@@ -586,6 +586,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
     draftKey ? draftImagesToAttachedImages(getDraft(draftKey)?.images) : []
   ));
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+  const [voiceNoticeTone, setVoiceNoticeTone] = useState<"info" | "error">("info");
   const trimmedValue = value.trimStart();
   const bashMode = attachedImages.length === 0 && trimmedValue.startsWith("!");
   const bashExcluded = bashMode && trimmedValue.startsWith("!!");
@@ -2310,6 +2312,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
         )}
 
+        {/* Voice dictation status — mobile users have no tooltips, so every
+            voice outcome (error, empty segment, per-segment progress) must be
+            visible inline. */}
+        {voiceNotice && (
+          <div className="text-xs px-2 py-1" style={{ color: voiceNoticeTone === "error" ? "#ef4444" : "var(--text-muted)", marginTop: 4 }}>
+            {voiceNotice}
+          </div>
+        )}
+
         {/* Bottom bar: left | center (context) | right */}
         {!compact && <div className="chat-input-controls" style={{
           marginTop: isMobile ? 4 : 8,
@@ -2350,6 +2361,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </svg>
             </button>
             <VoiceDictateButton
+              onNotice={(message, tone) => {
+                setVoiceNotice(message);
+                setVoiceNoticeTone(tone === "error" ? "error" : "info");
+              }}
               onTranscript={(text) => {
                 const ta = textareaRef.current;
                 if (!ta) {

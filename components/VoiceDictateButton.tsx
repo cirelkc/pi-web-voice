@@ -42,9 +42,12 @@ function pickRecorderMime(): string | undefined {
 
 export function VoiceDictateButton({
   onTranscript,
+  onNotice,
   disabled = false,
 }: {
   onTranscript: (text: string) => void;
+  /** Visible status for outcomes a mobile user can't see via tooltips. */
+  onNotice?: (message: string, tone: "info" | "error") => void;
   disabled?: boolean;
 }) {
   const { t } = useI18n();
@@ -88,8 +91,8 @@ export function VoiceDictateButton({
       pendingRef.current += 1;
       syncPhase();
       // Serial chain: segments append in recording order, one request in
-      // flight. A failed segment logs to the tooltip and skips — the chain
-      // must never reject, or every later segment would be dropped.
+      // flight. A failed segment logs to the composer notice line and skips —
+      // the chain must never reject, or every later segment would be dropped.
       const run = async () => {
         try {
           const form = new FormData();
@@ -102,9 +105,20 @@ export function VoiceDictateButton({
             throw new Error(data?.detail || data?.error || `HTTP ${response.status}`);
           }
           const text = (data?.text ?? "").trim();
-          if (text && mountedRef.current) onTranscript(text);
+          if (text && mountedRef.current) {
+            onTranscript(text);
+            if (mountedRef.current) onNotice?.(`${t("chat.voiceSegmentOk")} (+${text.split(/\s+/).length})`, "info");
+          } else if (mountedRef.current) {
+            // Empty transcript: usually a silent/muted mic track (known iOS
+            // quirk) or pure silence. Say so instead of doing nothing.
+            onNotice?.(t("chat.voiceEmpty"), "error");
+          }
         } catch (err) {
-          if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
+          if (mountedRef.current) {
+            const message = err instanceof Error ? err.message : String(err);
+            setError(message);
+            onNotice?.(`${t("chat.voiceFailed")}: ${message}`, "error");
+          }
         } finally {
           pendingRef.current -= 1;
           syncPhase();
@@ -113,7 +127,7 @@ export function VoiceDictateButton({
       chainRef.current = chainRef.current.then(run, run);
       return chainRef.current;
     },
-    [onTranscript, syncPhase],
+    [onNotice, onTranscript, syncPhase, t],
   );
 
   const startSegmentRecorder = useCallback(
@@ -177,12 +191,14 @@ export function VoiceDictateButton({
     } catch (err) {
       releaseStream();
       if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        onNotice?.(`${t("chat.voiceMicError")}: ${message}`, "error");
         activeRef.current = false;
         syncPhase();
       }
     }
-  }, [releaseStream, startSegmentRecorder, syncPhase]);
+  }, [onNotice, releaseStream, startSegmentRecorder, syncPhase, t]);
 
   const stopRecording = useCallback(() => {
     activeRef.current = false;
