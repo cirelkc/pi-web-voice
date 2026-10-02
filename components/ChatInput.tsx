@@ -25,6 +25,7 @@ import {
 import { getMarkdownListContinuation } from "@/lib/markdown-list-continuation";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { ImagePreview } from "./ImagePreview";
+import { VoiceDictateButton } from "./VoiceDictateButton";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEnterSendMode } from "@/hooks/useEnterSendMode";
 import { useI18n } from "@/hooks/useI18n";
@@ -2348,6 +2349,32 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <polyline points="21 15 16 10 5 21" />
               </svg>
             </button>
+            <VoiceDictateButton
+              onTranscript={(text) => {
+                const ta = textareaRef.current;
+                if (!ta) {
+                  setValue((v) => v + (v ? " " : "") + text);
+                  return;
+                }
+                const start = ta.selectionStart ?? ta.value.length;
+                const end = ta.selectionEnd ?? ta.value.length;
+                const before = ta.value.slice(0, start);
+                const after = ta.value.slice(end);
+                const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
+                const newVal = before + sep + text + after;
+                valueRef.current = newVal;
+                setValue(newVal);
+                requestAnimationFrame(() => {
+                  const el = textareaRef.current;
+                  if (!el) return;
+                  const pos = start + sep.length + text.length;
+                  el.setSelectionRange(pos, pos);
+                  el.focus();
+                  el.style.height = "auto";
+                  el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+                });
+              }}
+            />
             {/* Model selector - visible always, disabled while the session or switch is busy */}
             {(modelOptions.length > 0 || model || modelError) && onModelChange && (
               <ModelSelector
