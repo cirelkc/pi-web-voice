@@ -592,24 +592,51 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   // Global voice shortcut. Plain Shift+A toggles the mic only outside text
   // fields (inside them it must keep typing a capital A); Cmd/Ctrl+Shift+A
-  // works everywhere, including the composer.
+  // works everywhere, including the composer. Double-tap on any
+  // non-interactive area does the same on touch devices (the composer
+  // surface sets touch-action: manipulation so taps aren't eaten by
+  // double-tap-to-zoom).
   useEffect(() => {
+    let lastTapAt = 0;
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
       if (target.isContentEditable) return true;
       const tag = target.tagName;
       return tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
     };
+    const isInteractiveTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      return Boolean(target.closest("button, a, input, textarea, select, label, [role='button']"));
+    };
+    const toggleVoice = () => voiceDictateRef.current?.toggle();
     const onKeyDown = (event: WindowEventMap["keydown"]) => {
       if (event.key !== "A" && event.key !== "a") return;
       if (!event.shiftKey || event.altKey) return;
       const hasModifier = event.metaKey || event.ctrlKey;
       if (!hasModifier && isEditableTarget(event.target)) return;
       event.preventDefault();
-      voiceDictateRef.current?.toggle();
+      toggleVoice();
+    };
+    const onClick = (event: MouseEvent) => {
+      if (isInteractiveTarget(event.target) || isEditableTarget(event.target)) {
+        lastTapAt = 0;
+        return;
+      }
+      const now = Date.now();
+      if (now - lastTapAt < 350) {
+        lastTapAt = 0;
+        event.preventDefault();
+        toggleVoice();
+      } else {
+        lastTapAt = now;
+      }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("click", onClick);
+    };
   }, []);
   // Auto-send dictation: the settled transcript goes straight to the chat as
   // its own prompt — steered into a running turn, sent normally otherwise.
