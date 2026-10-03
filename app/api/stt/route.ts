@@ -16,6 +16,8 @@ export const runtime = "nodejs";
  *   PI_WEB_STT_ENDPOINT — full transcriptions URL
  *                         (default http://192.168.192.1:8816/v1/audio/transcriptions)
  *   PI_WEB_STT_MODEL    — model id (default parakeet-tdt-0.6b-v3)
+ *   PI_WEB_STT_API_KEY  — optional Bearer token for the STT server
+ *                         (e.g. mlx-qwen3-asr serve requires one)
  *
  * Accepts multipart/form-data with an `file` part (any audio format the
  * upstream can decode via ffmpeg: webm/opus, mp4/aac, wav, m4a…).
@@ -46,10 +48,16 @@ export async function POST(request: Request) {
   outgoing.append("file", file, file.name || "audio.webm");
   outgoing.append("model", model);
 
+  const upstreamHeaders: Record<string, string> = {};
+  if (process.env.PI_WEB_STT_API_KEY) {
+    upstreamHeaders.authorization = `Bearer ${process.env.PI_WEB_STT_API_KEY}`;
+  }
+
   try {
     const upstream = await fetch(endpoint, {
       method: "POST",
       body: outgoing,
+      headers: upstreamHeaders,
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
     const body = await upstream.text();
