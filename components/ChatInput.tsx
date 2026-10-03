@@ -588,6 +588,26 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   ));
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [voiceNoticeTone, setVoiceNoticeTone] = useState<"info" | "error">("info");
+  // Auto-send dictation: the settled transcript goes straight to the chat as
+  // its own prompt — steered into a running turn, sent normally otherwise.
+  // The composer is deliberately not touched, so any draft the user was
+  // typing stays intact.
+  const sendDictation = useCallback((text: string) => {
+    const msg = text.trim();
+    if (!msg) return;
+    onAudioUnlock?.();
+    if (isStreaming) {
+      if (onSteer) {
+        onSteer(msg, undefined);
+        return;
+      }
+      if (onFollowUp) {
+        onFollowUp(msg, undefined);
+        return;
+      }
+    }
+    onSend(msg, undefined);
+  }, [isStreaming, onAudioUnlock, onSend, onSteer, onFollowUp]);
   const trimmedValue = value.trimStart();
   const bashMode = attachedImages.length === 0 && trimmedValue.startsWith("!");
   const bashExcluded = bashMode && trimmedValue.startsWith("!!");
@@ -2361,6 +2381,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </svg>
             </button>
             <VoiceDictateButton
+              autoSend
+              onFinalTranscript={sendDictation}
               onNotice={(message, tone) => {
                 setVoiceNotice(message);
                 setVoiceNoticeTone(tone === "error" ? "error" : "info");

@@ -34,7 +34,6 @@ type Phase = "idle" | "recording" | "finishing";
 // overhead (upload + decode + model warm-up) amortizes; short enough that
 // transcripts start landing within the first minute of a long monologue.
 const SEGMENT_MS = 60_000;
-
 function pickRecorderMime(): string | undefined {
   const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
   return candidates.find((m) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m));
@@ -43,11 +42,20 @@ function pickRecorderMime(): string | undefined {
 export function VoiceDictateButton({
   onTranscript,
   onNotice,
+  autoSend = false,
+  onFinalTranscript,
   disabled = false,
 }: {
   onTranscript: (text: string) => void;
   /** Visible status for outcomes a mobile user can't see via tooltips. */
   onNotice?: (message: string, tone: "info" | "error") => void;
+  /**
+   * When true, segments accumulate silently (no composer insertion) and the
+   * full transcript is handed to onFinalTranscript once the recording stops
+   * and every segment has transcribed — one dictation, one prompt.
+   */
+  autoSend?: boolean;
+  onFinalTranscript?: (text: string) => void;
   disabled?: boolean;
 }) {
   const { t } = useI18n();
@@ -63,6 +71,7 @@ export function VoiceDictateButton({
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mimeRef = useRef<{ mimeType?: string; extension: string }>({ extension: "webm" });
+  const transcriptRef = useRef(""); // accumulated segments (autoSend mode)
 
   useEffect(() => {
     mountedRef.current = true;
@@ -106,7 +115,13 @@ export function VoiceDictateButton({
           }
           const text = (data?.text ?? "").trim();
           if (text && mountedRef.current) {
-            onTranscript(text);
+            if (autoSend) {
+              transcriptRef.current = transcriptRef.current
+                ? `${transcriptRef.current} ${text}`
+                : text;
+            } else {
+              onTranscript(text);
+            }
             if (mountedRef.current) onNotice?.(`${t("chat.voiceSegmentOk")} (+${text.split(/\s+/).length})`, "info");
           } else if (mountedRef.current) {
             // Empty transcript: usually a silent/muted mic track (known iOS
@@ -121,13 +136,23 @@ export function VoiceDictateButton({
           }
         } finally {
           pendingRef.current -= 1;
+          // Recording finished and the backlog drained: in autoSend mode this
+          // is the commit point — hand over the whole transcript exactly once.
+          if (!activeRef.current && pendingRef.current === 0 && mountedRef.current) {
+            const full = transcriptRef.current.trim();
+            transcriptRef.current = "";
+            if (autoSend) {
+              if (full) onFinalTranscript?.(full);
+              else onNotice?.(t("chat.voiceEmpty"), "error");
+            }
+          }
           syncPhase();
         }
       };
       chainRef.current = chainRef.current.then(run, run);
       return chainRef.current;
     },
-    [onNotice, onTranscript, syncPhase, t],
+    [autoSend, onFinalTranscript, onNotice, onTranscript, syncPhase, t],
   );
 
   const startSegmentRecorder = useCallback(
@@ -171,6 +196,7 @@ export function VoiceDictateButton({
       }
       streamRef.current = stream;
       chunksRef.current = [];
+      transcriptRef.current = "";
       const mimeType = pickRecorderMime();
       mimeRef.current = {
         mimeType,
