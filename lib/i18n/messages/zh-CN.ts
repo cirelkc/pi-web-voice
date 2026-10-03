@@ -428,7 +428,7 @@ export const zhCNLocale: LocalePlugin = {
     "chat.quoteQuestion": "我的问题是：",
     "chat.quoteForkFailed": "无法从这条消息创建分支。",
     "chat.attachImage": "附加图片",
-    "chat.voiceDictate": "语音输入（再次点击结束）",
+    "chat.voiceDictate": "语音输入 — Shift+A 开始/停止，自动发送",
     "chat.voiceStop": "停止录音",
     "chat.voiceTranscribing": "转写中…",
     "chat.voiceSegmentOk": "片段转写完成",

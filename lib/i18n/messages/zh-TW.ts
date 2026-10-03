@@ -428,7 +428,7 @@ export const zhTWLocale: LocalePlugin = {
     "chat.quoteQuestion": "我的問題是：",
     "chat.quoteForkFailed": "無法從這則訊息建立分支。",
     "chat.attachImage": "附加圖片",
-    "chat.voiceDictate": "語音輸入（再次點擊結束）",
+    "chat.voiceDictate": "語音輸入 — Shift+A 開始/停止，自動傳送",
     "chat.voiceStop": "停止錄音",
     "chat.voiceTranscribing": "轉寫中…",
     "chat.voiceSegmentOk": "片段轉寫完成",

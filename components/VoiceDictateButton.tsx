@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 
 /**
@@ -39,13 +39,13 @@ function pickRecorderMime(): string | undefined {
   return candidates.find((m) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m));
 }
 
-export function VoiceDictateButton({
-  onTranscript,
-  onNotice,
-  autoSend = false,
-  onFinalTranscript,
-  disabled = false,
-}: {
+
+export interface VoiceDictateHandle {
+  /** Toggle recording — same as clicking the button. No-op while draining. */
+  toggle: () => void;
+}
+
+interface VoiceDictateButtonProps {
   onTranscript: (text: string) => void;
   /** Visible status for outcomes a mobile user can't see via tooltips. */
   onNotice?: (message: string, tone: "info" | "error") => void;
@@ -57,7 +57,18 @@ export function VoiceDictateButton({
   autoSend?: boolean;
   onFinalTranscript?: (text: string) => void;
   disabled?: boolean;
-}) {
+}
+
+export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateButtonProps>(function VoiceDictateButton(
+  {
+    onTranscript,
+    onNotice,
+    autoSend = false,
+    onFinalTranscript,
+    disabled = false,
+  }: VoiceDictateButtonProps,
+  ref,
+) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -237,11 +248,13 @@ export function VoiceDictateButton({
     }
   }, [syncPhase]);
 
-  const handleClick = () => {
+  const handleClick = useCallback(() => {
     if (phase === "recording") stopRecording();
     else if (phase === "idle") void startRecording();
     // "finishing" is not clickable — the backlog is draining in order.
-  };
+  }, [phase, startRecording, stopRecording]);
+
+  useImperativeHandle(ref, () => ({ toggle: () => handleClick() }), [handleClick]);
 
   const label =
     phase === "recording"
@@ -305,4 +318,4 @@ export function VoiceDictateButton({
       `}</style>
     </>
   );
-}
+});

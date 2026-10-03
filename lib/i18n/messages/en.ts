@@ -428,7 +428,7 @@ export const enLocale: LocalePlugin = {
     "chat.quoteQuestion": "My question:",
     "chat.quoteForkFailed": "Unable to create a branch from this message.",
     "chat.attachImage": "Attach image",
-    "chat.voiceDictate": "Dictate (click again to stop)",
+    "chat.voiceDictate": "Dictate — Shift+A to start/stop; sends automatically",
     "chat.voiceStop": "Stop recording",
     "chat.voiceTranscribing": "Transcribing…",
     "chat.voiceSegmentOk": "Segment transcribed",
