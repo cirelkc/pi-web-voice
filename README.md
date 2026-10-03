@@ -1,188 +1,88 @@
-# Pi Web
+# Pi Web Voice
 
-[中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+A fork of [agegr/pi-web](https://github.com/agegr/pi-web) (web UI for the [pi coding agent](https://github.com/badlogic/pi-mono)) that adds **voice dictation**: talk to your agent instead of typing. Audio is transcribed by *your own* self-hosted speech-to-text server — no cloud, no API keys for third parties.
 
-Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web uses the same local configuration and session files as pi, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
+![voice dictation](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
 
-**[Try the interactive demo →](https://agegr.github.io/pi-web/)** The real Pi Web UI runs entirely in your browser, with sample sessions, files and models. There is nothing to install; replies are pre-written and no model is called.
+## What's added
 
-![Pi Web displaying a pi session with structured Markdown, tool calls, and project navigation](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
+- **🎤 Mic button in the chat composer** — press to record, press again to stop. The transcript is sent to the chat as a prompt automatically (steers a running agent, sends normally when idle).
+- **Progressive long-form dictation** — recordings are cut into 60-second segments that transcribe while you keep talking; nothing buffers in memory and transcripts never wait for the end.
+- **⌨️ `Shift+A`** toggles the mic outside text fields; **`Cmd/Ctrl+Shift+A`** works anywhere (including the composer).
+- **👆 Double-tap** any empty area of the page toggles the mic on touch devices (iOS Safari included).
+- **JSON-configurable STT backends** — switch between Parakeet, Qwen3-ASR, Whisper servers, or anything OpenAI-compatible by editing one file. No restart.
+- Same-origin `/api/stt` proxy — the STT server needs no CORS setup, and API keys never reach the browser.
 
-## Features
+Everything else from upstream pi-web is unchanged: sessions, branching, file tools, config panels, i18n (en / zh-CN / zh-TW for all voice strings).
 
-- **Session workspace**: browse, resume, rename, export, and delete conversations grouped by project, with running state, context usage, cost, and compaction details.
-- **Two ways to branch**: **New session** creates an independent session file from an earlier message; **Edit from here** creates a branch inside the current session.
-- **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
-- **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
-- **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
-- **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
-
-## Quick Start
-
-Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:
+## Install
 
 ```bash
-npx @agegr/pi-web@latest
+npm install -g github:cirelkc/pi-web-voice
+pi-web-voice
 ```
 
-The CLI opens a browser after the server is ready. If it does not, open [http://127.0.0.1:30141](http://127.0.0.1:30141). Pi Web listens only on `127.0.0.1` by default.
+Requires Node.js 22.19+ and a reachable OpenAI-compatible transcription endpoint (see below). Opens `http://127.0.0.1:30141` by default.
 
-If no model provider is configured yet, open the **Models** panel to sign in or add an API key.
+> Updating: `npm update -g pi-web-voice`, or reinstall with the command above.
 
-To install the `pi-web` command globally:
+## Configure an STT backend
 
-```bash
-npm install -g @agegr/pi-web@latest
-pi-web
+Create `~/.config/pi-web-voice.json`:
+
+```json
+{
+  "active": "qwen",
+  "backends": {
+    "parakeet": {
+      "endpoint": "http://192.168.192.1:8816/v1/audio/transcriptions",
+      "model": "parakeet-tdt-0.6b-v3"
+    },
+    "qwen": {
+      "endpoint": "http://192.168.192.1:8765/v1/audio/transcriptions",
+      "model": "Qwen/Qwen3-ASR-1.7B",
+      "apiKey": "your-bearer-token"
+    },
+    "whisper": {
+      "endpoint": "http://localhost:8899/v1/audio/transcriptions",
+      "model": "whisper-large-v3-turbo"
+    }
+  }
+}
 ```
 
-To update, stop the running process with `Ctrl+C` and run the same install command again. To uninstall, run `npm uninstall -g @agegr/pi-web`.
+- **`active`** — which backend serves dictation. Switch backends by editing this one field; the file is re-read on every request, no restart.
+- **`apiKey`** — optional per-backend Bearer token (e.g. `mlx-qwen3-asr serve` requires one). Stays server-side, never sent to the browser.
+- The request's `model` field can also name a backend explicitly (`"model": "parakeet"` routes to the `parakeet` backend).
 
-## Configuration
+**Any OpenAI-compatible `/v1/audio/transcriptions` server works.** Good self-hosted options on Apple Silicon:
 
-For port and hostname, command-line options override the corresponding environment variables. Either `--no-open` or `PI_WEB_NO_OPEN=1` disables automatic browser opening. Run `pi-web --help` (or `-h`) to print startup options and exit without starting the server. Unknown options exit with an error.
+| Backend | Strengths | One-liner |
+|---|---|---|
+| [NVIDIA Parakeet TDT 0.6B v3](https://github.com/senstella/parakeet-mlx) via [`parakeet-api`](https://pypi.org/project/parakeet-api/) | Fastest English/European, ~3,300× real-time | `uv tool install parakeet-api && parakeet-api` |
+| [Qwen3-ASR 1.7B](https://github.com/moona3k/mlx-qwen3-asr) | Strongest multilingual (30 languages + 22 dialects) | `uv tool install "mlx-qwen3-asr[serve]" && mlx-qwen3-asr serve --api-key <key>` |
+| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) server | 99 languages, timestamps, battle-tested | build + `server -m ggml-large-v3-turbo` |
 
-| Option or environment variable | Purpose | Default |
-| --- | --- | --- |
-| `--help`, `-h` | Print startup options and exit | — |
-| `--port <port>`, `-p <port>`, or `PORT` | Server port | `30141` |
-| `--hostname <host>`, `-H <host>`, or `PI_WEB_HOSTNAME` | Bind hostname | `127.0.0.1` |
-| `--no-open` or `PI_WEB_NO_OPEN=1` | Do not open a browser automatically | Browser opens |
-| `PI_WEB_SKIP_VERSION_CHECK=1` | Disable Pi Web update checks | Unset |
-| `PI_WEB_ALLOWED_HOSTS` | Additional exact proxy or custom hostnames, comma-separated | Unset |
-| `PI_WEB_PASSWORD` | Enable browser password login; API clients may use Basic Auth with username `pi` | Authentication disabled |
-| `PI_WEB_IDLE_TIMEOUT_MS` | Session idle timeout in milliseconds, up to `2147483647`; `0` disables idle shutdown; invalid or out-of-range values use the default | `600000` (10 min) |
-| `PI_WEB_SHUTDOWN_DEADLINE_MS` | How long extensions get to handle `session_shutdown` before a closing session is disposed anyway, in milliseconds up to `2147483647`; `0`, invalid or out-of-range values use the default | `5000` (5 s) |
+Without a config file, the endpoint falls back to `PI_WEB_STT_ENDPOINT` / `PI_WEB_STT_MODEL` / `PI_WEB_STT_API_KEY` env vars (useful in containers), then to built-in defaults.
 
-For example:
+## Microphone requirements
 
-```bash
-pi-web --help
-pi-web -p 8080 -H 0.0.0.0 --no-open
-```
+- **macOS**: grant your terminal/browser microphone access under System Settings → Privacy & Security.
+- **HTTPS or localhost**: browsers only grant microphone access in a secure context. `http://127.0.0.1:30141` works out of the box; for LAN/phone access, put pi-web-voice behind TLS (Cloudflare Tunnel, Tailscale serve, or a local HTTPS proxy) or use SSH port forwarding so the phone sees `127.0.0.1`.
+- **iOS**: use Safari; the double-tap gesture replaces the keyboard shortcut.
 
-### Remote Access
+## Voice config file reference
 
-Binding to a non-loopback address exposes an agent that can execute high-privilege actions. On a trusted LAN, require a long random password:
+| Path | Purpose |
+|---|---|
+| `~/.config/pi-web-voice.json` (or `$PI_WEB_VOICE_CONFIG`) | STT backend routing — `active`, `backends` |
 
-```bash
-PI_WEB_PASSWORD='a-long-random-password' pi-web --hostname 0.0.0.0
-```
+Status/diagnostics: `GET /api/stt` returns the resolved config path, whether the file loaded, the active backend, and the configured backend list.
 
-Password authentication does not encrypt the connection. Do not expose Pi Web over plain HTTP to the internet; use HTTPS through a trusted reverse proxy or a trusted VPN. If a reverse proxy sends an external hostname, add that exact name to `PI_WEB_ALLOWED_HOSTS`. This allow-list does not change the address Pi Web binds to.
+## Upstream
 
-### HTTP Proxy
-
-Server-side model and API requests honor the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables.
-
-On macOS or Linux:
-
-```bash
-HTTP_PROXY=http://127.0.0.1:7890 \
-HTTPS_PROXY=http://127.0.0.1:7890 \
-NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
-```
-
-On Windows PowerShell:
-
-```powershell
-$env:HTTP_PROXY = "http://127.0.0.1:7890"
-$env:HTTPS_PROXY = "http://127.0.0.1:7890"
-$env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
-```
-
-## Notes
-
-- **Agent data**: Pi Web reads pi data from `~/.pi/agent` by default, including session files under `sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. Set `PI_CODING_AGENT_DIR` to use another pi agent directory.
-- **Filesystem access**: Pi Web must be able to read the agent data directory and the working directories recorded by its sessions. Run Pi Web in the same filesystem environment as pi when sharing existing sessions.
-- **Shared configuration**: the Models panel uses pi's model, settings, and credential storage, so changes are visible to both interfaces.
-- **File access boundary**: the file browser is limited to working directories selected in Pi Web and project or session roots it already knows about; it is not a general filesystem browser.
-- **Git worktrees**: see [Worktrees in Pi Web](./docs/worktrees.md) for switcher visibility, worktree creation, and removal behavior.
-
-### Downstream Session Context Menu
-
-Electron wrappers and other downstream integrations can provide a session-row
-context menu without patching `SessionSidebar`. Listen for the cancelable
-`pi-web:session-row-contextmenu` browser event and call `preventDefault()`
-synchronously when the integration will handle it:
-
-```js
-window.addEventListener("pi-web:session-row-contextmenu", (event) => {
-  event.preventDefault();
-  const { id, path, cwd, name, clientX, clientY, refresh } = event.detail;
-
-  void openSessionMenu({ id, path, cwd, name, clientX, clientY }).then((changed) => {
-    if (changed) refresh();
-  });
-});
-```
-
-The detail object contains `id`, `path`, `cwd`, optional `name`, pointer
-coordinates, and a `refresh()` callback for actions that change the session
-list. If no listener cancels the extension event, Pi Web preserves the
-browser's native context menu. This hook is browser-side and independent of
-Pi agent extensions.
-
-### Extension Session Liveness
-
-Server-side Pi extensions with detached work can prevent automatic idle
-session eviction through the versioned global registry:
-
-```js
-const liveness = globalThis[Symbol.for("@agegr/pi-web/session-liveness/v1")];
-const release = liveness?.version === 1
-  ? liveness.register({
-      name: "my-extension",
-      sessionId,
-      sessionFile: sessionFile || undefined,
-      isActive: () => detachedJobs.size > 0,
-    })
-  : () => {};
-```
-
-Register once per active extension session and call the returned idempotent
-`release` function on session shutdown, replacement, or reload. `isActive`
-must be synchronous, cheap, and scoped to the supplied exact session id or
-file. Provider errors fail safe by preserving that session. This lease only
-affects automatic idle eviction; explicit shutdown and Stop fallback cleanup
-still take precedence.
-
-## Development
-
-```bash
-npm install
-npm run dev
-```
-
-The development server runs at [http://127.0.0.1:30141](http://127.0.0.1:30141). Run the common checks with:
-
-```bash
-npm test
-node_modules/.bin/tsc --noEmit
-npm run lint
-```
-
-Do not run `next build` or `npm run build` during normal development. It writes to `.next/` and can interfere with the development server; leave builds for release work.
-
-Contributor guides: [Internationalization](./docs/i18n.md) and [Release process](./docs/release.md).
-
-## Repository Layout
-
-```text
-app/             Next.js UI and API routes
-components/      React UI components
-hooks/           Client state and interaction hooks
-lib/             Session, agent, model, file, Git, and security logic
-public/          Static assets and PWA files
-bin/             npm CLI entrypoint and launch option parsing
-docs/            Focused user and contributor guides
-demo/            Static browser demo published to GitHub Pages (see demo/README.md)
-```
-
-See [AGENTS.md](./AGENTS.md) for the architecture notes and detailed file map.
+All upstream pi-web features and docs apply unchanged — see the [upstream README](https://github.com/agegr/pi-web#readme). This fork tracks upstream `v0.9.3`.
 
 ## License
 
-[MIT](./LICENSE)
+MIT — same as upstream.

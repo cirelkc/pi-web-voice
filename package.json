@@ -1,14 +1,14 @@
 {
-  "name": "@agegr/pi-web",
-  "version": "0.9.3-voice.8",
-  "description": "Web UI for the pi coding agent",
-  "homepage": "https://github.com/agegr/pi-web#readme",
+  "name": "pi-web-voice",
+  "version": "1.0.0",
+  "description": "Pi Web fork with voice dictation \u2014 /voice-style mic button in the chat composer, auto-send, Shift+A / double-tap triggers, JSON-configurable STT backends",
+  "homepage": "https://github.com/cirelkc/pi-web-voice#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/agegr/pi-web.git"
+    "url": "git+https://github.com/cirelkc/pi-web-voice.git"
   },
   "bugs": {
-    "url": "https://github.com/agegr/pi-web/issues"
+    "url": "https://github.com/cirelkc/pi-web-voice/issues"
   },
   "license": "MIT",
   "engines": {
@@ -22,7 +22,7 @@
     "ios_saf 16.2"
   ],
   "bin": {
-    "pi-web": "bin/pi-web.js"
+    "pi-web-voice": "bin/pi-web.js"
   },
   "files": [
     "bin",
@@ -94,5 +94,15 @@
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
-  }
+  },
+  "keywords": [
+    "pi",
+    "pi-web",
+    "voice",
+    "dictation",
+    "stt",
+    "whisper",
+    "parakeet",
+    "qwen"
+  ]
 }
