@@ -25,7 +25,7 @@ import {
 import { getMarkdownListContinuation } from "@/lib/markdown-list-continuation";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { ImagePreview } from "./ImagePreview";
-import { VoiceDictateButton, type VoiceDictateHandle } from "./VoiceDictateButton";
+import { VoiceDictateButton, type VoiceDictateHandle, type VoicePhase } from "./VoiceDictateButton";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEnterSendMode } from "@/hooks/useEnterSendMode";
 import { useI18n } from "@/hooks/useI18n";
@@ -588,57 +588,32 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   ));
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [voiceNoticeTone, setVoiceNoticeTone] = useState<"info" | "error">("info");
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const voiceDictateRef = useRef<VoiceDictateHandle>(null);
 
   // Global voice shortcut. Plain Shift+A toggles the mic only outside text
   // fields (inside them it must keep typing a capital A); Cmd/Ctrl+Shift+A
-  // works everywhere, including the composer. Double-tap on any
-  // non-interactive area does the same on touch devices (the composer
-  // surface sets touch-action: manipulation so taps aren't eaten by
-  // double-tap-to-zoom).
+  // works everywhere, including the composer. Toggling off inserts the
+  // transcript into the composer — use the voice Send button to send directly.
   useEffect(() => {
-    let lastTapAt = 0;
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
       if (target.isContentEditable) return true;
       const tag = target.tagName;
       return tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
     };
-    const isInteractiveTarget = (target: EventTarget | null): boolean => {
-      if (!(target instanceof HTMLElement)) return false;
-      return Boolean(target.closest("button, a, input, textarea, select, label, [role='button']"));
-    };
-    const toggleVoice = () => voiceDictateRef.current?.toggle();
     const onKeyDown = (event: WindowEventMap["keydown"]) => {
       if (event.key !== "A" && event.key !== "a") return;
       if (!event.shiftKey || event.altKey) return;
       const hasModifier = event.metaKey || event.ctrlKey;
       if (!hasModifier && isEditableTarget(event.target)) return;
       event.preventDefault();
-      toggleVoice();
-    };
-    const onClick = (event: MouseEvent) => {
-      if (isInteractiveTarget(event.target) || isEditableTarget(event.target)) {
-        lastTapAt = 0;
-        return;
-      }
-      const now = Date.now();
-      if (now - lastTapAt < 350) {
-        lastTapAt = 0;
-        event.preventDefault();
-        toggleVoice();
-      } else {
-        lastTapAt = now;
-      }
+      voiceDictateRef.current?.toggle();
     };
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("click", onClick);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("click", onClick);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-  // Auto-send dictation: the settled transcript goes straight to the chat as
+  // Voice auto-send: the settled transcript goes straight to the chat as
   // its own prompt — steered into a running turn, sent normally otherwise.
   // The composer is deliberately not touched, so any draft the user was
   // typing stays intact.
@@ -658,6 +633,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     }
     onSend(msg, undefined);
   }, [isStreaming, onAudioUnlock, onSend, onSteer, onFollowUp]);
+
+  // Voice "Stop" action: the settled transcript lands in the composer for
+  // review/editing before the user sends it themselves.
+  const insertVoiceTranscript = useCallback((text: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setValue((v) => v + (v ? " " : "") + text);
+      return;
+    }
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(end);
+    const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
+    const newVal = before + sep + text + after;
+    valueRef.current = newVal;
+    setValue(newVal);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const pos = start + sep.length + text.length;
+      el.setSelectionRange(pos, pos);
+      el.focus();
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    });
+  }, []);
   const trimmedValue = value.trimStart();
   const bashMode = attachedImages.length === 0 && trimmedValue.startsWith("!");
   const bashExcluded = bashMode && trimmedValue.startsWith("!!");
@@ -2341,7 +2343,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 </button>
               )}
             </div>
-          ) : (
+          ) : voicePhase === "idle" && !isStreaming ? (
             <button
               onClick={handleSend}
               disabled={!value.trim() && !attachedImages.length}
@@ -2371,6 +2373,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </svg>
               {!isMobile && t("chat.send")}
             </button>
+          ) : null}
+          {!compact && (
+          <VoiceDictateButton
+            ref={voiceDictateRef}
+            onInsertTranscript={insertVoiceTranscript}
+            onSendTranscript={sendDictation}
+            onNotice={(message, tone) => {
+              setVoiceNotice(message);
+              setVoiceNoticeTone(tone === "error" ? "error" : "info");
+            }}
+            onPhaseChange={setVoicePhase}
+          />
           )}
           </div>
         </div>
@@ -2430,39 +2444,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <polyline points="21 15 16 10 5 21" />
               </svg>
             </button>
-            <VoiceDictateButton
-              ref={voiceDictateRef}
-              autoSend
-              onFinalTranscript={sendDictation}
-              onNotice={(message, tone) => {
-                setVoiceNotice(message);
-                setVoiceNoticeTone(tone === "error" ? "error" : "info");
-              }}
-              onTranscript={(text) => {
-                const ta = textareaRef.current;
-                if (!ta) {
-                  setValue((v) => v + (v ? " " : "") + text);
-                  return;
-                }
-                const start = ta.selectionStart ?? ta.value.length;
-                const end = ta.selectionEnd ?? ta.value.length;
-                const before = ta.value.slice(0, start);
-                const after = ta.value.slice(end);
-                const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
-                const newVal = before + sep + text + after;
-                valueRef.current = newVal;
-                setValue(newVal);
-                requestAnimationFrame(() => {
-                  const el = textareaRef.current;
-                  if (!el) return;
-                  const pos = start + sep.length + text.length;
-                  el.setSelectionRange(pos, pos);
-                  el.focus();
-                  el.style.height = "auto";
-                  el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-                });
-              }}
-            />
             {/* Model selector - visible always, disabled while the session or switch is busy */}
             {(modelOptions.length > 0 || model || modelError) && onModelChange && (
               <ModelSelector

@@ -1,7 +1,7 @@
 {
   "name": "pi-web-voice",
-  "version": "1.0.0",
-  "description": "Pi Web fork with voice dictation \u2014 /voice-style mic button in the chat composer, auto-send, Shift+A / double-tap triggers, JSON-configurable STT backends",
+  "version": "1.0.1",
+  "description": "Pi Web fork with voice dictation — /voice-style mic button in the chat composer, auto-send, Shift+A / double-tap triggers, JSON-configurable STT backends",
   "homepage": "https://github.com/cirelkc/pi-web-voice#readme",
   "repository": {
     "type": "git",

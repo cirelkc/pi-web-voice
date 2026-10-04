@@ -4,73 +4,67 @@ import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef,
 import { useI18n } from "@/hooks/useI18n";
 
 /**
- * VoiceDictateButton — mic button for the chat composer.
+ * VoiceDictateButton — the voice recording control that sits next to Send.
  *
- * Records in-browser via MediaRecorder, transcribes through the same-origin
- * /api/stt proxy (which forwards to a self-hosted OpenAI-compatible
- * transcription endpoint), and hands the transcript to the composer.
+ * States:
+ *   idle      → 🎤 trigger button
+ *   recording → [⏹ Stop] [📤 Send] — Stop inserts the transcript into the
+ *               composer; Send sends it straight to the chat
+ *   finishing → spinner while the last segments drain; the transcript then
+ *               lands according to the action chosen at stop time
  *
- * Long-recording strategy: the recording is cut into SEGMENT_MS segments.
- * When a segment closes, the next one starts immediately on the same stream
- * and the closed segment joins a FIFO transcription chain — so a long
- * dictation streams into the composer progressively instead of buffering the
- * whole recording in memory and transcribing one giant blob at the end.
- * Segments are transcribed strictly in order (one in flight), so appended
- * text is always chronological.
+ * Recording model: audio is cut into SEGMENT_MS segments; each closed segment
+ * joins a FIFO transcription chain while the next one records on the same
+ * stream, so a long dictation streams through the server progressively and
+ * memory stays bounded. Segments accumulate here (never in the composer) and
+ * are handed over exactly once, when the backlog drains after stop.
  *
- * Segment boundaries can occasionally clip a word (each segment is a
- * self-contained file; MediaRecorder offers no rewind). 60s segments make
- * that rare enough for dictation use while keeping memory and per-request
- * latency bounded.
- *
- * Codec choice: Safari (iOS) only produces audio/mp4 (AAC); Chromium/Firefox
- * produce audio/webm (opus). Both decode fine upstream via ffmpeg, so we pick
- * whatever the browser natively supports rather than transcoding client-side.
+ * Codec choice: Safari (iOS) produces audio/mp4 (AAC); Chromium/Firefox
+ * produce audio/webm (opus). Both decode fine upstream via ffmpeg.
  */
 
-type Phase = "idle" | "recording" | "finishing";
+export type VoicePhase = "idle" | "recording" | "finishing";
+type StopAction = "insert" | "send";
+
+export interface VoiceDictateHandle {
+  /** Toggle recording — Shift+A path. Recording → stop with insert action. */
+  toggle: () => void;
+}
+
+interface VoiceDictateButtonProps {
+  /** Insert action: transcript lands in the composer for review. */
+  onInsertTranscript: (text: string) => void;
+  /** Send action: transcript goes straight to the chat. */
+  onSendTranscript: (text: string) => void;
+  /** Visible status for outcomes a mobile user can't see via tooltips. */
+  onNotice?: (message: string, tone: "info" | "error") => void;
+  /** Lets the parent hide its own Send/steer buttons while voice is active. */
+  onPhaseChange?: (phase: VoicePhase) => void;
+  disabled?: boolean;
+}
 
 // Segment length. Long enough that mid-word cuts are rare and per-segment
 // overhead (upload + decode + model warm-up) amortizes; short enough that
 // transcripts start landing within the first minute of a long monologue.
 const SEGMENT_MS = 60_000;
+
 function pickRecorderMime(): string | undefined {
   const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
   return candidates.find((m) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m));
 }
 
-
-export interface VoiceDictateHandle {
-  /** Toggle recording — same as clicking the button. No-op while draining. */
-  toggle: () => void;
-}
-
-interface VoiceDictateButtonProps {
-  onTranscript: (text: string) => void;
-  /** Visible status for outcomes a mobile user can't see via tooltips. */
-  onNotice?: (message: string, tone: "info" | "error") => void;
-  /**
-   * When true, segments accumulate silently (no composer insertion) and the
-   * full transcript is handed to onFinalTranscript once the recording stops
-   * and every segment has transcribed — one dictation, one prompt.
-   */
-  autoSend?: boolean;
-  onFinalTranscript?: (text: string) => void;
-  disabled?: boolean;
-}
-
 export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateButtonProps>(function VoiceDictateButton(
   {
-    onTranscript,
+    onInsertTranscript,
+    onSendTranscript,
     onNotice,
-    autoSend = false,
-    onFinalTranscript,
+    onPhaseChange,
     disabled = false,
   }: VoiceDictateButtonProps,
   ref,
 ) {
   const { t } = useI18n();
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhase] = useState<VoicePhase>("idle");
   const [error, setError] = useState<string | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -82,7 +76,8 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mimeRef = useRef<{ mimeType?: string; extension: string }>({ extension: "webm" });
-  const transcriptRef = useRef(""); // accumulated segments (autoSend mode)
+  const transcriptRef = useRef(""); // accumulated segments
+  const stopActionRef = useRef<StopAction>("insert"); // chosen when recording stops
 
   useEffect(() => {
     mountedRef.current = true;
@@ -103,8 +98,10 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
   // Phase is derived: recording while active, else draining queued segments.
   const syncPhase = useCallback(() => {
     if (!mountedRef.current) return;
-    setPhase(activeRef.current ? "recording" : pendingRef.current > 0 ? "finishing" : "idle");
-  }, []);
+    const next: VoicePhase = activeRef.current ? "recording" : pendingRef.current > 0 ? "finishing" : "idle";
+    setPhase(next);
+    onPhaseChange?.(next);
+  }, [onPhaseChange]);
 
   const transcribeSegment = useCallback(
     (blob: Blob, extension: string): Promise<void> => {
@@ -126,17 +123,11 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
           }
           const text = (data?.text ?? "").trim();
           if (text && mountedRef.current) {
-            if (autoSend) {
-              transcriptRef.current = transcriptRef.current
-                ? `${transcriptRef.current} ${text}`
-                : text;
-            } else {
-              onTranscript(text);
-            }
+            transcriptRef.current = transcriptRef.current
+              ? `${transcriptRef.current} ${text}`
+              : text;
             if (mountedRef.current) onNotice?.(`${t("chat.voiceSegmentOk")} (+${text.split(/\s+/).length})`, "info");
           } else if (mountedRef.current) {
-            // Empty transcript: usually a silent/muted mic track (known iOS
-            // quirk) or pure silence. Say so instead of doing nothing.
             onNotice?.(t("chat.voiceEmpty"), "error");
           }
         } catch (err) {
@@ -147,14 +138,16 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
           }
         } finally {
           pendingRef.current -= 1;
-          // Recording finished and the backlog drained: in autoSend mode this
-          // is the commit point — hand over the whole transcript exactly once.
+          // Recording finished and the backlog drained: commit point — hand
+          // over the whole transcript exactly once, per the chosen action.
           if (!activeRef.current && pendingRef.current === 0 && mountedRef.current) {
             const full = transcriptRef.current.trim();
             transcriptRef.current = "";
-            if (autoSend) {
-              if (full) onFinalTranscript?.(full);
-              else onNotice?.(t("chat.voiceEmpty"), "error");
+            if (full) {
+              if (stopActionRef.current === "send") onSendTranscript(full);
+              else onInsertTranscript(full);
+            } else {
+              onNotice?.(t("chat.voiceEmpty"), "error");
             }
           }
           syncPhase();
@@ -163,7 +156,7 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
       chainRef.current = chainRef.current.then(run, run);
       return chainRef.current;
     },
-    [autoSend, onFinalTranscript, onNotice, onTranscript, syncPhase, t],
+    [onInsertTranscript, onNotice, onSendTranscript, syncPhase, t],
   );
 
   const startSegmentRecorder = useCallback(
@@ -199,6 +192,8 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
 
   const startRecording = useCallback(async () => {
     setError(null);
+    stopActionRef.current = "insert";
+    transcriptRef.current = "";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!mountedRef.current) {
@@ -207,7 +202,6 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
       }
       streamRef.current = stream;
       chunksRef.current = [];
-      transcriptRef.current = "";
       const mimeType = pickRecorderMime();
       mimeRef.current = {
         mimeType,
@@ -237,85 +231,163 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
     }
   }, [onNotice, releaseStream, startSegmentRecorder, syncPhase, t]);
 
-  const stopRecording = useCallback(() => {
-    activeRef.current = false;
-    if (recorderRef.current?.state === "recording") {
-      recorderRef.current.stop(); // onstop drains the stream + final segment
-    } else {
-      // Between segments (recorder just closed, next not yet started): the
-      // in-flight onstop sees activeRef=false and drains from there.
-      syncPhase();
-    }
-  }, [syncPhase]);
+  const stopRecording = useCallback(
+    (action: StopAction) => {
+      stopActionRef.current = action;
+      activeRef.current = false;
+      if (recorderRef.current?.state === "recording") {
+        recorderRef.current.stop(); // onstop drains the stream + final segment
+      } else {
+        // Between segments (recorder just closed, next not yet started): the
+        // in-flight onstop sees activeRef=false and drains from there.
+        syncPhase();
+      }
+    },
+    [syncPhase],
+  );
 
-  const handleClick = useCallback(() => {
-    if (phase === "recording") stopRecording();
+  const toggle = useCallback(() => {
+    if (phase === "recording") stopRecording("insert");
     else if (phase === "idle") void startRecording();
-    // "finishing" is not clickable — the backlog is draining in order.
+    // "finishing" is not actionable — the backlog is draining in order.
   }, [phase, startRecording, stopRecording]);
 
-  useImperativeHandle(ref, () => ({ toggle: () => handleClick() }), [handleClick]);
+  useImperativeHandle(ref, () => ({ toggle }), [toggle]);
 
-  const label =
-    phase === "recording"
-      ? t("chat.voiceStop")
-      : phase === "finishing"
-        ? `${t("chat.voiceTranscribing")}${pendingRef.current > 0 ? ` (${pendingRef.current})` : ""}`
-        : t("chat.voiceDictate");
+  const iconStyle = {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 32,
+    height: 32,
+    padding: 0,
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    transition: "background 0.15s, color 0.15s",
+  } as const;
 
-  return (
-    <>
+  if (phase === "recording") {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={() => stopRecording("insert")}
+          disabled={disabled}
+          title={t("chat.voiceStopTitle")}
+          aria-label={t("chat.voiceStopTitle")}
+          style={{
+            ...iconStyle,
+            gap: 5,
+            width: "auto",
+            padding: disabled ? "7px 12px" : "7px 12px",
+            background: "none",
+            border: "1px solid var(--border, rgba(128,128,128,0.35))",
+            color: "var(--text)",
+            opacity: disabled ? 0.5 : 1,
+            animation: "voice-pulse 1.2s ease-in-out infinite",
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" />
+          </svg>
+          {!isMobileLike() && t("chat.voiceStopButton")}
+        </button>
+        <button
+          type="button"
+          onClick={() => stopRecording("send")}
+          disabled={disabled}
+          title={t("chat.voiceSendTitle")}
+          aria-label={t("chat.voiceSendTitle")}
+          style={{
+            ...iconStyle,
+            gap: 5,
+            width: "auto",
+            padding: "7px 12px",
+            background: "var(--accent)",
+            color: "var(--accent-contrast)",
+            boxShadow: "0 1px 3px color-mix(in srgb, var(--accent) 25%, transparent)",
+            opacity: disabled ? 0.5 : 1,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="2" y1="7" x2="11" y2="7" />
+            <polyline points="7.5 3 12 7 7.5 11" />
+          </svg>
+          {!isMobileLike() && t("chat.voiceSendButton")}
+        </button>
+        <style jsx>{`
+          @keyframes voice-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.55; }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  if (phase === "finishing") {
+    return (
       <button
         type="button"
-        onClick={handleClick}
-        disabled={disabled || phase === "finishing"}
-        title={error ? `${label} — ${error}` : label}
-        aria-label={label}
+        disabled
+        title={`${t("chat.voiceTranscribing")}${pendingRef.current > 0 ? ` (${pendingRef.current})` : ""}`}
+        aria-label={t("chat.voiceTranscribing")}
         style={{
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 32,
-          height: 32,
-          padding: 0,
-          background: phase === "recording" ? "rgba(239,68,68,0.15)" : "none",
-          border: "none",
-          borderRadius: 9,
-          color: phase === "recording" ? "#ef4444" : error ? "#f59e0b" : "var(--text-muted)",
-          cursor: phase === "finishing" ? "wait" : "pointer",
-          opacity: 1,
-          animation: phase === "recording" ? "voice-pulse 1.2s ease-in-out infinite" : undefined,
-          transition: "background 0.12s, color 0.12s",
-        }}
-        onMouseEnter={(e) => {
-          if (phase !== "recording") e.currentTarget.style.background = "var(--bg-hover)";
-        }}
-        onMouseLeave={(e) => {
-          if (phase !== "recording") e.currentTarget.style.background = "none";
+          ...iconStyle,
+          background: "none",
+          color: "var(--text-muted)",
+          cursor: "wait",
         }}
       >
-        {phase === "finishing" ? (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
-            <path d="M21 12a9 9 0 1 1-6.2-8.56" />
-          </svg>
-        ) : (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="2" width="6" height="12" rx="3" />
-            <path d="M5 10a7 7 0 0 0 14 0" />
-            <line x1="12" y1="17" x2="12" y2="21" />
-          </svg>
-        )}
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: "voice-spin 1s linear infinite" }}>
+          <path d="M21 12a9 9 0 1 1-6.2-8.56" />
+        </svg>
+        <style jsx>{`
+          @keyframes voice-spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </button>
-      <style jsx>{`
-        @keyframes voice-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.45; }
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-    </>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void startRecording()}
+      disabled={disabled}
+      title={error ? `${t("chat.voiceDictate")} — ${error}` : t("chat.voiceDictate")}
+      aria-label={t("chat.voiceDictate")}
+      style={{
+        ...iconStyle,
+        alignSelf: "flex-end",
+        background: "var(--bg-panel)",
+        color: error ? "#f59e0b" : "var(--text-muted)",
+        opacity: disabled ? 0.5 : 1,
+        cursor: "pointer",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--bg-hover)";
+        e.currentTarget.style.color = "var(--text)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "var(--bg-panel)";
+        e.currentTarget.style.color = error ? "#f59e0b" : "var(--text-muted)";
+      }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="9" y="2" width="6" height="12" rx="3" />
+        <path d="M5 10a7 7 0 0 0 14 0" />
+        <line x1="12" y1="17" x2="12" y2="21" />
+      </svg>
+    </button>
   );
 });
+
+// Matches ChatInput's useIsMobile breakpoint without importing the hook into
+// this leaf twice — icon-only labels under ~640px, like the Send button.
+function isMobileLike(): boolean {
+  return typeof window !== "undefined" && window.innerWidth < 640;
+}
