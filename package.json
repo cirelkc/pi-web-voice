@@ -30,19 +30,9 @@
     "!.next/cache",
     "!.next/dev",
     "!.next/**/*.js.map",
-    "app",
-    "components",
-    "hooks",
-    "lib",
-    "instrumentation.ts",
-    "instrumentation-node.ts",
+    "public",
     "next.config.ts",
-    "postcss.config.mjs",
-    "proxy.ts",
-    "tailwind.config.ts",
-    "tsconfig.json",
-    "package.json",
-    "public"
+    "package.json"
   ],
   "scripts": {
     "postinstall": "node bin/prepare-terminal.js",

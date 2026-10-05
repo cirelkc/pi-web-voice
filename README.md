@@ -17,14 +17,25 @@ Everything else from upstream pi-web is unchanged: sessions, branching, file too
 
 ## Install
 
+The package is distributed as a prebuilt tarball — registry installs are not
+possible (the npm name is taken) and git-URL installs cannot work (npm's
+preparation of git dependencies breaks global installs, and Next.js cannot
+build from any path containing `node_modules`, which is where installed
+packages live).
+
+From a checkout of this repository:
+
 ```bash
-npm install -g github:cirelkc/pi-web-voice
+scripts/release-tarball.sh          # builds pi-web-voice-<version>.tgz in a scratch worktree
+npm install -g pi-web-voice-<version>.tgz
 pi-web-voice
 ```
 
 Requires Node.js 22.19+ and a reachable OpenAI-compatible transcription endpoint (see below). Opens `http://127.0.0.1:30141` by default.
 
-> Updating: `npm update -g pi-web-voice`, or reinstall with the command above.
+> Updating: re-run the two commands above, or `npm install -g <tarball>` again.
+
+> Installing on another machine: copy the `.tgz` over (AirDrop, scp, a GitHub release attachment) and install it there.
 
 ## Configure an STT backend
 

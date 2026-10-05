@@ -44,3 +44,6 @@ yarn-error.log*
 next-env.d.ts
 .factory
 e2e_*.mjs
+
+# release tarball from scripts/release-tarball.sh
+/pi-web-voice-*.tgz

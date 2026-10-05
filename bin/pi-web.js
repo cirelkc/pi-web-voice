@@ -10,7 +10,7 @@ if (!isNodeVersionSupported(process.versions.node)) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { spawn, spawnSync } = require("child_process");
+const { spawn } = require("child_process");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const path = require("path");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -58,26 +58,19 @@ try {
   }
 }
 
-// Builds published through a registry tarball ship a prebuilt .next directory
-// (see "files" in package.json), but installs straight from a git URL do not:
-// .next/ is gitignored, so the clone has no build artifacts. Build once on
-// first launch instead. This only triggers outside the development checkout —
-// there, .next already exists (and a production build over it would break
-// `npm run dev`).
+// A build cannot run from an installed location: global installs always live
+// under a node_modules directory, and Next's swc loader passes through every
+// file under such a path untransformed, so plain TypeScript in app/ would fail
+// to parse. The package therefore always ships a prebuilt .next (see "files"
+// in package.json and scripts/release-tarball.sh).
 if (!fs.existsSync(nextDir)) {
-  fs.writeSync(process.stdout.fd, "First run: building the app (one to two minutes)...\n");
-  const build = spawnSync(process.execPath, getNextNodeArgs(nextBin, ["build", "--webpack"]), {
-    cwd: pkgDir,
-    stdio: "inherit",
-  });
-  if (build.error) {
-    fs.writeSync(process.stderr.fd, `Could not run the build: ${build.error.message}\n`);
-    process.exit(1);
-  }
-  if (build.status !== 0 || !fs.existsSync(nextDir)) {
-    fs.writeSync(process.stderr.fd, "Build failed. Re-run `npm run build` inside the package directory for the full error.\n");
-    process.exit(build.status ?? 1);
-  }
+  console.error(
+    "Build artifacts (.next) not found.\n" +
+    "This package is distributed as a prebuilt tarball. Install it with:\n" +
+    "  npm install -g pi-web-voice-<version>.tgz\n" +
+    "after creating it with scripts/release-tarball.sh (or npm run build + npm pack in a scratch clone).",
+  );
+  process.exit(1);
 }
 
 const loopbackHostnames = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
