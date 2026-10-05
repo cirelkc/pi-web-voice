@@ -10,7 +10,7 @@ if (!isNodeVersionSupported(process.versions.node)) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const path = require("path");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -55,6 +55,28 @@ try {
     nextBin = path.join(path.dirname(nextPkg), "dist", "bin", "next");
   } catch {
     nextBin = path.join(pkgDir, "node_modules", "next", "dist", "bin", "next");
+  }
+}
+
+// Builds published through a registry tarball ship a prebuilt .next directory
+// (see "files" in package.json), but installs straight from a git URL do not:
+// .next/ is gitignored, so the clone has no build artifacts. Build once on
+// first launch instead. This only triggers outside the development checkout —
+// there, .next already exists (and a production build over it would break
+// `npm run dev`).
+if (!fs.existsSync(nextDir)) {
+  fs.writeSync(process.stdout.fd, "First run: building the app (one to two minutes)...\n");
+  const build = spawnSync(process.execPath, getNextNodeArgs(nextBin, ["build", "--webpack"]), {
+    cwd: pkgDir,
+    stdio: "inherit",
+  });
+  if (build.error) {
+    fs.writeSync(process.stderr.fd, `Could not run the build: ${build.error.message}\n`);
+    process.exit(1);
+  }
+  if (build.status !== 0 || !fs.existsSync(nextDir)) {
+    fs.writeSync(process.stderr.fd, "Build failed. Re-run `npm run build` inside the package directory for the full error.\n");
+    process.exit(build.status ?? 1);
   }
 }
 
