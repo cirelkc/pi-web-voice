@@ -1,7 +1,7 @@
 {
   "name": "pi-web-voice",
   "version": "1.0.1",
-  "description": "Pi Web fork with voice dictation — /voice-style mic button in the chat composer, auto-send, Shift+A / double-tap triggers, JSON-configurable STT backends",
+  "description": "Pi Web fork with voice dictation \u2014 /voice-style mic button in the chat composer, auto-send, Shift+A / double-tap triggers, JSON-configurable STT backends",
   "homepage": "https://github.com/cirelkc/pi-web-voice#readme",
   "repository": {
     "type": "git",
@@ -22,7 +22,8 @@
     "ios_saf 16.2"
   ],
   "bin": {
-    "pi-web-voice": "bin/pi-web.js"
+    "pi-web-voice": "bin/pi-web.js",
+    "pi-web-voice-https": "https-proxy/server.mjs"
   },
   "files": [
     "bin",
@@ -32,7 +33,8 @@
     "!.next/**/*.js.map",
     "public",
     "next.config.ts",
-    "package.json"
+    "package.json",
+    "https-proxy/"
   ],
   "scripts": {
     "postinstall": "node bin/prepare-terminal.js",

@@ -90,6 +90,29 @@ Without a config file, the endpoint falls back to `PI_WEB_STT_ENDPOINT` / `PI_WE
 
 Status/diagnostics: `GET /api/stt` returns the resolved config path, whether the file loaded, the active backend, and the configured backend list.
 
+## Voice over HTTPS (LAN / phone access)
+
+Browsers only grant microphone access in a **secure context**: `http://127.0.0.1:30141` works out of the box, but phones and other LAN devices need HTTPS. The package ships a zero-dependency TLS wrapper with automatic local-CA generation:
+
+```bash
+# terminal 1
+pi-web-voice --no-open
+# terminal 2
+pi-web-voice-https          # https://0.0.0.0:8443 -> http://127.0.0.1:8080
+```
+
+First run auto-creates a local root CA and a server cert (SANs: localhost, hostname, every LAN IPv4). Then, once per device:
+
+1. Safari/Chrome → `https://<lan-ip>:8443/pi-web-ca.crt` (proceed past the warning)
+2. Install the profile (iOS: Settings → Profile Downloaded → Install)
+3. iOS only: Settings → General → About → Certificate Trust Settings → enable full trust for **"pi-web Local Root CA"**
+
+After that, `https://<lan-ip>:8443` is fully trusted — padlock, working microphone, from any device on your network. (Cloudflare Tunnel or Tailscale serve are equally valid alternatives — anything that yields a trusted origin.)
+
+Env options: `PORT` (8443), `TARGET` (http://127.0.0.1:8080), `PI_WEB_HTTPS_DATA` (cert dir, default `~/.local/share/pi-web-https`). Re-run `node $(npm root -g)/pi-web-voice/https-proxy/gen-certs.mjs` after your machine's LAN IPs change to regenerate the server cert.
+
+Keep in mind the upstream server itself should not be exposed with mic-granting plaintext if you care about that — the wrapper exists precisely so the TLS origin is the one devices use.
+
 ## Upstream
 
 All upstream pi-web features and docs apply unchanged — see the [upstream README](https://github.com/agegr/pi-web#readme). This fork tracks upstream `v0.9.3`.
