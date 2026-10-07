@@ -591,10 +591,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const voiceDictateRef = useRef<VoiceDictateHandle>(null);
 
-  // Global voice shortcut. Plain Shift+A toggles the mic only outside text
+  // Global voice shortcuts. Plain Shift+A toggles the mic only outside text
   // fields (inside them it must keep typing a capital A); Cmd/Ctrl+Shift+A
-  // works everywhere, including the composer. Toggling off inserts the
-  // transcript into the composer — use the voice Send button to send directly.
+  // works everywhere, including the composer. Pressing it again while
+  // recording stops and *sends* the transcript to the chat. Shift+S (same
+  // editable-target rule, Cmd/Ctrl+Shift+S anywhere) stops a recording and
+  // inserts the transcript into the composer instead — the keyboard twin of
+  // the Stop button.
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
@@ -603,37 +606,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       return tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
     };
     const onKeyDown = (event: WindowEventMap["keydown"]) => {
-      if (event.key !== "A" && event.key !== "a") return;
+      const key = event.key.toLowerCase();
+      if (key !== "a" && key !== "s") return;
       if (!event.shiftKey || event.altKey) return;
       const hasModifier = event.metaKey || event.ctrlKey;
       if (!hasModifier && isEditableTarget(event.target)) return;
       event.preventDefault();
-      voiceDictateRef.current?.toggle();
+      if (key === "a") voiceDictateRef.current?.toggle();
+      else voiceDictateRef.current?.stopWithInsert();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-  // Voice auto-send: the settled transcript goes straight to the chat as
-  // its own prompt — steered into a running turn, sent normally otherwise.
-  // The composer is deliberately not touched, so any draft the user was
-  // typing stays intact.
-  const sendDictation = useCallback((text: string) => {
-    const msg = text.trim();
-    if (!msg) return;
-    onAudioUnlock?.();
-    if (isStreaming) {
-      if (onSteer) {
-        onSteer(msg, undefined);
-        return;
-      }
-      if (onFollowUp) {
-        onFollowUp(msg, undefined);
-        return;
-      }
-    }
-    onSend(msg, undefined);
-  }, [isStreaming, onAudioUnlock, onSend, onSteer, onFollowUp]);
-
   // Voice "Stop" action: the settled transcript lands in the composer for
   // review/editing before the user sends it themselves.
   const insertVoiceTranscript = useCallback((text: string) => {
@@ -708,6 +692,63 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const pendingImageCountRef = useRef(0);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
+
+  // Image/text cleanup helpers live next to the refs they touch; clearInput is
+  // used by the voice send path below, which is declared before the JSX.
+  const removeImage = useCallback((index: number) => {
+    setAttachedImages((prev) => {
+      const next = [...prev];
+      const [removed] = next.splice(index, 1);
+      if (removed) revokeImagePreview(removed);
+      attachedImagesRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const clearImages = useCallback(() => {
+    attachedImagesRef.current = [];
+    setAttachedImages((prev) => {
+      prev.forEach(revokeImagePreview);
+      return [];
+    });
+  }, []);
+
+  const clearInput = useCallback(() => {
+    valueRef.current = "";
+    setValue("");
+    setAtQuery(null);
+    setHistoryMenuOpen(false);
+    if (draftKey) clearDraft(draftKey);
+    if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
+    clearImages();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+  }, [clearImages, draftKey]);
+
+  // Voice "Send" action: the settled transcript goes straight to the chat —
+  // steered into a running turn, sent normally otherwise. Text already in the
+  // composer when the transcript lands travels in the same message (existing
+  // text first, then the dictation), and the composer is cleared like a
+  // manual send.
+  const sendDictation = useCallback((text: string) => {
+    const existing = valueRef.current.trim();
+    if (!text.trim() && !existing) return;
+    const msg = [existing, text.trim()].filter(Boolean).join(" ");
+    onAudioUnlock?.();
+    if (existing) clearInput();
+    if (isStreaming) {
+      if (onSteer) {
+        onSteer(msg, undefined);
+        return;
+      }
+      if (onFollowUp) {
+        onFollowUp(msg, undefined);
+        return;
+      }
+    }
+    onSend(msg, undefined);
+  }, [isStreaming, onAudioUnlock, onSend, onSteer, onFollowUp, clearInput]);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -919,37 +960,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       pendingImageCountRef.current -= imageFiles.length;
     }
   }, [compact]);
-
-  const removeImage = useCallback((index: number) => {
-    setAttachedImages((prev) => {
-      const next = [...prev];
-      const [removed] = next.splice(index, 1);
-      if (removed) revokeImagePreview(removed);
-      attachedImagesRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const clearImages = useCallback(() => {
-    attachedImagesRef.current = [];
-    setAttachedImages((prev) => {
-      prev.forEach(revokeImagePreview);
-      return [];
-    });
-  }, []);
-
-  const clearInput = useCallback(() => {
-    valueRef.current = "";
-    setValue("");
-    setAtQuery(null);
-    setHistoryMenuOpen(false);
-    if (draftKey) clearDraft(draftKey);
-    if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
-    clearImages();
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-  }, [clearImages, draftKey]);
 
   useEffect(() => {
     if (!draftKey || draftKeyRef.current !== draftKey) return;

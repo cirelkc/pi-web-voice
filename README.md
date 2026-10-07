@@ -6,9 +6,9 @@ A fork of [agegr/pi-web](https://github.com/agegr/pi-web) (web UI for the [pi co
 
 ## What's added
 
-- **🎤 Mic button in the chat composer** — press to record, press again to stop. The transcript is sent to the chat as a prompt automatically (steers a running agent, sends normally when idle).
+- **🎤 Mic button in the chat composer** — press to record; [⏹ Stop] inserts the transcript into the composer, [📤 Send] sends it to the chat along with any text already drafted (steers a running agent, sends normally when idle).
 - **Progressive long-form dictation** — recordings are cut into 60-second segments that transcribe while you keep talking; nothing buffers in memory and transcripts never wait for the end.
-- **⌨️ `Shift+A`** toggles the mic outside text fields; **`Cmd/Ctrl+Shift+A`** works anywhere (including the composer).
+- **⌨️ `Shift+A`** toggles the mic outside text fields — a second press stops and sends the transcript to the chat; **`Cmd/Ctrl+Shift+A`** works anywhere (including the composer). **`Shift+S`** (or **`Cmd/Ctrl+Shift+S`** anywhere) stops a recording and inserts the transcript into the composer instead of sending it.
 - **👆 Double-tap** any empty area of the page toggles the mic on touch devices (iOS Safari included).
 - **JSON-configurable STT backends** — switch between Parakeet, Qwen3-ASR, Whisper servers, or anything OpenAI-compatible by editing one file. No restart.
 - Same-origin `/api/stt` proxy — the STT server needs no CORS setup, and API keys never reach the browser.

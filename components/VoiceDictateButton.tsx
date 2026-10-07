@@ -9,7 +9,8 @@ import { useI18n } from "@/hooks/useI18n";
  * States:
  *   idle      → 🎤 trigger button
  *   recording → [⏹ Stop] [📤 Send] — Stop inserts the transcript into the
- *               composer; Send sends it straight to the chat
+ *               composer; Send sends it straight to the chat along with any
+ *               text already drafted in the composer
  *   finishing → spinner while the last segments drain; the transcript then
  *               lands according to the action chosen at stop time
  *
@@ -27,8 +28,10 @@ export type VoicePhase = "idle" | "recording" | "finishing";
 type StopAction = "insert" | "send";
 
 export interface VoiceDictateHandle {
-  /** Toggle recording — Shift+A path. Recording → stop with insert action. */
+  /** Toggle recording — Shift+A path. Recording → stop with send action. */
   toggle: () => void;
+  /** Stop with insert action — Shift+S path / Stop button. No-op unless recording. */
+  stopWithInsert: () => void;
 }
 
 interface VoiceDictateButtonProps {
@@ -247,12 +250,17 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
   );
 
   const toggle = useCallback(() => {
-    if (phase === "recording") stopRecording("insert");
+    if (phase === "recording") stopRecording("send");
     else if (phase === "idle") void startRecording();
     // "finishing" is not actionable — the backlog is draining in order.
   }, [phase, startRecording, stopRecording]);
 
-  useImperativeHandle(ref, () => ({ toggle }), [toggle]);
+  const stopWithInsert = useCallback(() => {
+    if (phase !== "recording") return;
+    stopRecording("insert");
+  }, [phase, stopRecording]);
+
+  useImperativeHandle(ref, () => ({ toggle, stopWithInsert }), [toggle, stopWithInsert]);
 
   const iconStyle = {
     flexShrink: 0,
