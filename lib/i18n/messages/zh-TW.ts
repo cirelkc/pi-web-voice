@@ -438,6 +438,7 @@ export const zhTWLocale: LocalePlugin = {
     "chat.voiceSegmentOk": "片段轉寫完成",
     "chat.voiceEmpty": "未偵測到語音 — 請檢查麥克風或說話大聲一點",
     "chat.voiceFailed": "轉寫失敗",
+    "chat.voiceFailedAttempts": "轉寫失敗（第 {n} 次嘗試，共 {max} 次）：{message}",
     "chat.voiceMicError": "麥克風錯誤",
     "chat.previewImage": "預覽圖片",
     "chat.filterModels": "篩選模型…",

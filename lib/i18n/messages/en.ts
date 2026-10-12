@@ -438,6 +438,7 @@ export const enLocale: LocalePlugin = {
     "chat.voiceSegmentOk": "Segment transcribed",
     "chat.voiceEmpty": "No speech detected — check the mic or speak louder",
     "chat.voiceFailed": "Transcription failed",
+    "chat.voiceFailedAttempts": "Transcription failed (attempt {n} of {max}): {message}",
     "chat.voiceMicError": "Microphone error",
     "chat.previewImage": "Preview image",
     "chat.filterModels": "Filter models…",

@@ -48,6 +48,36 @@ interface VoiceDictateButtonProps {
 // transcripts start landing within the first minute of a long monologue.
 const SEGMENT_MS = 60_000;
 
+// Segment upload policy. The STT server can be busy or briefly fail, and a
+// dropped segment is lost speech — so each upload is retried with
+// exponential backoff, and every attempt is time-capped so a wedged request
+// can't stall the rest of the chain in the "finishing" spinner forever.
+// The per-attempt cap deliberately exceeds the server's own upstream timeout
+// (120s in app/api/stt/route.ts) so we never abort work the server is still
+// doing; it only bounds the case where the pipe never answers.
+const SEGMENT_ATTEMPTS = 3; // initial attempt + 2 backoff retries
+const SEGMENT_RETRY_BASE_MS = 800; // 800ms, 1600ms between attempts
+const SEGMENT_TIMEOUT_MS = 130_000;
+
+/** One transcription attempt for a segment upload. Returns the trimmed
+ *  transcript; an empty transcript is a valid success (a genuinely silent
+ *  segment — retrying it would triple upstream load for no gain), while
+ *  transport, HTTP, and timeout failures throw so the caller can retry. */
+async function transcribeOnce(form: FormData): Promise<string> {
+  const response = await fetch("/api/stt", {
+    method: "POST",
+    body: form,
+    signal: AbortSignal.timeout(SEGMENT_TIMEOUT_MS),
+  });
+  const data = (await response.json().catch(() => null)) as
+    | { text?: string; error?: string; detail?: string }
+    | null;
+  if (!response.ok) {
+    throw new Error(data?.detail || data?.error || `HTTP ${response.status}`);
+  }
+  return (data?.text ?? "").trim();
+}
+
 function pickRecorderMime(): string | undefined {
   const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
   return candidates.find((m) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m));
@@ -114,27 +144,39 @@ export const VoiceDictateButton = forwardRef<VoiceDictateHandle, VoiceDictateBut
         try {
           const form = new FormData();
           form.append("file", blob, `dictation.${extension}`);
-          const response = await fetch("/api/stt", { method: "POST", body: form });
-          const data = (await response.json().catch(() => null)) as
-            | { text?: string; error?: string; detail?: string }
-            | null;
-          if (!response.ok) {
-            throw new Error(data?.detail || data?.error || `HTTP ${response.status}`);
+          // Retry loop: transport/HTTP/timeout failures get exponential
+          // backoff up to SEGMENT_ATTEMPTS; empty transcripts do not retry
+          // (a silent segment is a valid result, not an upstream hiccup).
+          let text = "";
+          let lastError: unknown = null;
+          for (let attempt = 1; attempt <= SEGMENT_ATTEMPTS; attempt += 1) {
+            // Unmounted mid-retry: no one left to deliver to; the finally
+            // below still decrements the backlog so the chain keeps flowing.
+            if (!mountedRef.current) return;
+            try {
+              text = await transcribeOnce(form);
+              lastError = null;
+              break;
+            } catch (err) {
+              lastError = err;
+              if (attempt < SEGMENT_ATTEMPTS) {
+                await new Promise((resolve) => setTimeout(resolve, SEGMENT_RETRY_BASE_MS * 2 ** (attempt - 1)));
+              }
+            }
           }
-          const text = (data?.text ?? "").trim();
-          if (text && mountedRef.current) {
-            transcriptRef.current = transcriptRef.current
-              ? `${transcriptRef.current} ${text}`
-              : text;
-            if (mountedRef.current) onNotice?.(`${t("chat.voiceSegmentOk")} (+${text.split(/\s+/).length})`, "info");
-          } else if (mountedRef.current) {
-            onNotice?.(t("chat.voiceEmpty"), "error");
-          }
-        } catch (err) {
           if (mountedRef.current) {
-            const message = err instanceof Error ? err.message : String(err);
-            setError(message);
-            onNotice?.(`${t("chat.voiceFailed")}: ${message}`, "error");
+            if (lastError) {
+              const message = lastError instanceof Error ? lastError.message : String(lastError);
+              setError(message);
+              onNotice?.(t("chat.voiceFailedAttempts", { n: SEGMENT_ATTEMPTS, max: SEGMENT_ATTEMPTS, message }), "error");
+            } else if (text) {
+              transcriptRef.current = transcriptRef.current
+                ? `${transcriptRef.current} ${text}`
+                : text;
+              onNotice?.(`${t("chat.voiceSegmentOk")} (+${text.split(/\s+/).length})`, "info");
+            } else {
+              onNotice?.(t("chat.voiceEmpty"), "error");
+            }
           }
         } finally {
           pendingRef.current -= 1;

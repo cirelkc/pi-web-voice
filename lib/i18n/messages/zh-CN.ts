@@ -438,6 +438,7 @@ export const zhCNLocale: LocalePlugin = {
     "chat.voiceSegmentOk": "片段转写完成",
     "chat.voiceEmpty": "未检测到语音 — 请检查麦克风或说话大声一点",
     "chat.voiceFailed": "转写失败",
+    "chat.voiceFailedAttempts": "转写失败（第 {n} 次尝试，共 {max} 次）：{message}",
     "chat.voiceMicError": "麦克风错误",
     "chat.previewImage": "预览图片",
     "chat.filterModels": "筛选模型…",
