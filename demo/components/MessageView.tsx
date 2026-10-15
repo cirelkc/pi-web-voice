@@ -8,7 +8,7 @@ import { ThinkingIcon } from "./ThinkingIcon";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
-import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
+import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock, splitThinkingPieces } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell, type SplitDiffFile } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName } from "@/lib/tool-names";
@@ -958,6 +958,19 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }
 
+// A model looping in its thinking can write megabytes. As one text node, every
+// streamed chunk laid all of it out again (the prompt anchor reads layout after
+// each commit). As pieces, only the last one changes. Thinking that fits one
+// piece stays one text node.
+function ThinkingText({ text }: { text: string }) {
+  const pieces = useMemo(() => splitThinkingPieces(text), [text]);
+  if (pieces.length === 1) return text;
+  // No memo: React already skips a div whose text is unchanged, and a memo
+  // bailout keeps the old props, each a slice pinning the whole thinking of
+  // its chunk (995 MB retained streaming 2M Chinese characters).
+  return pieces.map((piece, index) => <div key={index}>{piece.text}</div>);
+}
+
 export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
   block: ThinkingContent;
   duration?: number;
@@ -1063,7 +1076,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex 
             overflowWrap: "anywhere",
           }}
         >
-           {loading ? t("i18n.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}
+           {loading ? t("i18n.loadingThinking") : error ?? <ThinkingText text={(block.deferred ? content : block.thinking) ?? ""} />}
         </div>
       )}
       {duration !== undefined && (
@@ -1690,11 +1703,35 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             fontSize: 12,
           }}
         >
-          <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 650 }}>
-            {title}
-          </span>
-           {isHiddenDisplay && <span style={{ color: "var(--text-dim)", fontSize: 11 }}>{t("i18n.hiddenExtensionMessage")}</span>}
-          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>{time}</span>}
+          <button
+            type="button"
+            onClick={() => setContentExpanded((v) => !v)}
+            aria-expanded={contentExpanded}
+            title={contentExpanded ? t("i18n.collapse") : t("i18n.expand")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              minWidth: 0,
+              flex: 1,
+              padding: 0,
+              border: "none",
+              background: "none",
+              color: "inherit",
+              cursor: "pointer",
+              fontSize: "inherit",
+              textAlign: "left",
+            }}
+          >
+            <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 650 }}>
+              {title}
+            </span>
+             {isHiddenDisplay && <span style={{ color: "var(--text-dim)", fontSize: 11 }}>{t("i18n.hiddenExtensionMessage")}</span>}
+            {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, flexShrink: 0 }}>{time}</span>}
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: contentExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+              <polyline points="2 3.5 5 6.5 8 3.5" />
+            </svg>
+          </button>
         </div>
 
         {contentExpanded ? (
@@ -1763,12 +1800,9 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                {copied ? t("i18n.copied") : t("i18n.copy")}
             </button>
           ) : null}
-          {(hasDetails || isHiddenDisplay) && (
+          {hasDetails && !isHiddenDisplay && (
             <button
-              onClick={() => {
-                if (isHiddenDisplay) setContentExpanded((v) => !v);
-                else setDetailsExpanded((v) => !v);
-              }}
+              onClick={() => setDetailsExpanded((v) => !v)}
               style={{
                 marginLeft: "auto",
                 padding: "3px 7px",
@@ -1779,9 +1813,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                 fontSize: 11,
               }}
             >
-              {isHiddenDisplay
-                 ? (contentExpanded ? t("i18n.collapse") : t("i18n.expand"))
-                 : (detailsExpanded ? t("i18n.hideDetails") : t("i18n.showDetails"))}
+              {detailsExpanded ? t("i18n.hideDetails") : t("i18n.showDetails")}
             </button>
           )}
         </div>

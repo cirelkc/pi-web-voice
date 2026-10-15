@@ -2,6 +2,8 @@
 
 A fork of [agegr/pi-web](https://github.com/agegr/pi-web) (web UI for the [pi coding agent](https://github.com/badlogic/pi-mono)) that adds **voice dictation**: talk to your agent instead of typing. Audio is transcribed by *your own* self-hosted speech-to-text server — no cloud, no API keys for third parties.
 
+Upstream documentation: [中文文档](./docs/README.zh-CN.md) | [日本語](./docs/README.ja.md) | [Русский](./docs/README.ru.md)
+
 ![voice dictation](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
 
 ## What's added
@@ -103,6 +105,8 @@ pi-web-voice-https          # https://0.0.0.0:8443 -> http://127.0.0.1:8080
 
 First run auto-creates a local root CA and a server cert (SANs: localhost, hostname, every LAN IPv4). Then, once per device:
 
+Upstream `pi-web` CLI commands (`version`, `status`, `stop`, `open`, `update`) work the same way with `pi-web-voice`; see the [upstream README](https://github.com/agegr/pi-web#readme).
+
 1. Safari/Chrome → `https://<lan-ip>:8443/pi-web-ca.crt` (proceed past the warning)
 2. Install the profile (iOS: Settings → Profile Downloaded → Install)
 3. iOS only: Settings → General → About → Certificate Trust Settings → enable full trust for **"pi-web Local Root CA"**
@@ -115,7 +119,7 @@ Keep in mind the upstream server itself should not be exposed with mic-granting 
 
 ## Upstream
 
-All upstream pi-web features and docs apply unchanged — see the [upstream README](https://github.com/agegr/pi-web#readme). This fork tracks upstream `v0.9.3`.
+All upstream pi-web features and docs apply unchanged — see the [upstream README](https://github.com/agegr/pi-web#readme). This fork tracks upstream `v0.12.1`.
 
 ## License
 

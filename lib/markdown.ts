@@ -1,13 +1,26 @@
 import type { Content, Link, Parent, Root } from "mdast";
+import type { Element as HastElement, Root as HastRoot, RootContent as HastContent } from "hast";
 import { defaultUrlTransform, type Options as ReactMarkdownOptions } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkMath from "remark-math";
 import type { Plugin } from "unified";
 import type { Extension } from "micromark-util-types";
+
+// Link schemes of desktop apps that open a note, a file or a meeting (#1108).
+// A fixed list, not "any scheme but javascript:": the text comes from the model
+// and from repository files, and OS handlers such as ms-msdt: or search-ms:
+// have been exploited through a clicked link.
+const appLinkSchemes = [
+  "obsidian", "logseq", "notion",
+  "vscode", "vscode-insiders", "cursor", "zed", "jetbrains",
+  "zoommtg", "zoomus", "msteams", "slack",
+];
+const appLinkPattern = new RegExp(`^(?:${appLinkSchemes.join("|")}):`, "i");
 
 const markdownSanitizeSchema = {
   ...defaultSchema,
@@ -17,13 +30,24 @@ const markdownSanitizeSchema = {
   },
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "file"],
+    href: [...(defaultSchema.protocols?.href ?? []), "file", ...appLinkSchemes],
   },
   strip: [...(defaultSchema.strip || []), "iframe", "object", "style", "form"],
 };
 
+/** react-markdown's URL filter, plus links to the apps above. */
+export function markdownAppUrlTransform(value: string): string {
+  return appLinkPattern.test(value) ? value : defaultUrlTransform(value);
+}
+
+/** Also keeps `file:` links, for renderers that open local files in the app. */
 export function markdownUrlTransform(value: string): string {
-  return /^file:/i.test(value) ? value : defaultUrlTransform(value);
+  return /^file:/i.test(value) ? value : markdownAppUrlTransform(value);
+}
+
+/** A link that leaves the page: it names a scheme or another host. */
+export function isExternalMarkdownHref(href: string | undefined): boolean {
+  return Boolean(href && /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href));
 }
 
 /**
@@ -508,6 +532,7 @@ const remarkCurrencySafeMath: Plugin = function () {
 export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   [remarkFrontmatter, ["yaml"]],
   [remarkGfm, remarkGfmOptions],
+  remarkCjkFriendly,
   remarkSplitAutolinkLiterals,
   remarkCurrencySafeMath,
 ];
@@ -573,6 +598,7 @@ export const markdownUserRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = 
 export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   [remarkFrontmatter, ["yaml"]],
   [remarkGfm, remarkGfmOptions],
+  remarkCjkFriendly,
   remarkSplitAutolinkLiterals,
   remarkCurrencySafeMath,
 ];
@@ -580,6 +606,42 @@ export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"]
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
+  [rehypeKatex, { throwOnError: false, strict: false }],
+];
+
+function hastText(node: HastContent): string {
+  return node.type === "text" ? node.value : node.type === "element" ? node.children.map(hastText).join("") : "";
+}
+
+/** GitHub's heading slugs for `#fragment` links, as a data attribute: two rendered documents never share an id. */
+function markdownHeadingAnchors() {
+  return (tree: HastRoot) => {
+    const seen = new Map<string, number>();
+    const visit = (node: HastRoot | HastElement) => node.children.forEach((child) => {
+      if (child.type !== "element") return;
+      if (/^h[1-6]$/.test(child.tagName)) {
+        const base = hastText(child).toLowerCase().replace(/[^\p{L}\p{M}\p{N}_\- ]/gu, "").replace(/ /g, "-");
+        // As github-slugger numbers repeats: "a", "a", "a-1" become a, a-1, a-1-1.
+        let slug = base;
+        while (seen.has(slug)) {
+          seen.set(base, seen.get(base)! + 1);
+          slug = `${base}-${seen.get(base)}`;
+        }
+        seen.set(slug, 0);
+        child.properties.dataHeadingAnchor = slug;
+      }
+      visit(child);
+    });
+    visit(tree);
+  };
+}
+
+// A document whose `#fragment` links lead to its headings (Settings › Skills).
+// Anchors come before KaTeX, which writes each formula's text twice.
+export const markdownDocumentRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
+  rehypeRaw,
+  [rehypeSanitize, markdownSanitizeSchema],
+  markdownHeadingAnchors,
   [rehypeKatex, { throwOnError: false, strict: false }],
 ];
 

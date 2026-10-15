@@ -18,6 +18,8 @@ export interface ContextUsage {
 export interface ModelLike {
   id: string;
   provider: string;
+  /** Dollars per million tokens. */
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }
 
 export interface ToolInfo {
@@ -153,6 +155,8 @@ export interface AgentSessionLike {
       readonly systemPrompt?: string;
       thinkingLevel?: string;
       streamingMessage?: PiAgentMessage;
+      /** The declared tools, with the descriptions `prepareLoadout` hooks set for the model. */
+      readonly tools?: readonly { readonly name: string; readonly description: string }[];
     };
   };
   readonly extensionRunner: ExtensionRunnerLike;

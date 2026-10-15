@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
+import ts from "typescript";
 
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
@@ -9,8 +11,10 @@ const jiti = createJiti(import.meta.url, {
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const {
+  CompactionSummaryDetails,
   MessageView,
   ThinkingBlock,
+  formatToolDuration,
   getModelDisplayName,
   getTokenEstimateText,
   getToolCallInputText,
@@ -18,6 +22,7 @@ const {
 } = await jiti.import("./MessageView.tsx");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { splitFinalAssistantBlocks } = await jiti.import("@/lib/message-display");
+const { clearExpandedToolCalls, setToolCallExpanded } = await jiti.import("@/lib/tool-call-expansion");
 
 function renderMessage(message, props = {}) {
   return renderToStaticMarkup(
@@ -72,6 +77,39 @@ test("previews the first thinking line and reveals the full text with the saved 
   }
 });
 
+test("renders long expanded thinking in pieces and short thinking as one text node (#1196)", () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { localStorage: { getItem: () => "true" } };
+  const contentOf = (thinking) => {
+    const html = renderToStaticMarkup(React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(ThinkingBlock, { block: { type: "thinking", thinking }, blockIndex: 0 }),
+    ));
+    return html.match(/overflow-wrap:anywhere">([\s\S]*)<\/div><\/div>$/)[1];
+  };
+  const piecesOf = (thinking) => {
+    const content = contentOf(thinking);
+    const pieces = [...content.matchAll(/<div>([^<]*)<\/div>/g)].map((match) => match[1]);
+    assert.equal(pieces.map((piece) => `<div>${piece}</div>`).join(""), content);
+    assert.ok(pieces.length > 1);
+    return pieces;
+  };
+  try {
+    assert.equal(contentOf("First <b>line</b>\n\nSecond line."), "First &lt;b&gt;line&lt;/b&gt;\n\nSecond line.");
+
+    // The block boundary stands in for the line break at a cut; a line with
+    // no break is cut with nothing left out.
+    const thinking = "Wait, let me check settings.json again.\n".repeat(2_000);
+    assert.equal(piecesOf(thinking).join("\n"), thinking);
+    const oneLine = "Wait, let me check settings.json again. ".repeat(2_000);
+    assert.equal(piecesOf(oneLine).join(""), oneLine);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
 test("shows deferred thinking previews without loading the full content", () => {
   const html = renderMessage({
     role: "assistant",
@@ -79,6 +117,22 @@ test("shows deferred thinking previews without loading the full content", () => 
   });
   assert.match(html, />Historical first line<\/span>/);
   assert.match(html, /aria-expanded="false"/);
+});
+
+test("keys an assistant message's blocks by their place, not the entry id (#1184)", () => {
+  // A message of the running turn gets its entry id when the file is read again.
+  // A block keyed by it remounted then: open thinking closed, a tool output's
+  // scroll went back to the top. ThinkingBlock drops what it loaded for another id.
+  const source = ts.createSourceFile("MessageView.tsx", readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const keys = [];
+  (function visit(node) {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(source) === "BlockView") {
+      const key = node.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "key");
+      keys.push(key?.initializer?.expression?.getText(source));
+    }
+    ts.forEachChild(node, visit);
+  })(source);
+  assert.deepEqual(keys, ["originalIndex"]);
 });
 
 test("marks only the matched text block after splitting thinking and the final answer", () => {
@@ -128,7 +182,51 @@ test("keeps streamed tool input out of collapsed markup while counting it", () =
   assert.equal(getTokenEstimateText(block), block.rawInput);
 });
 
-test("renders subagents as standard tool calls with only an extra session button", () => {
+test("renders write tool content as readable file text", () => {
+  const block = {
+    type: "toolCall",
+    toolCallId: "call-write-file",
+    toolName: "write",
+    input: { path: "src/example.ts", content: "first line\nsecond line\n" },
+  };
+  clearExpandedToolCalls();
+  setToolCallExpanded(block.toolCallId, true);
+  try {
+    const html = renderMessage({
+      role: "assistant",
+      provider: "anthropic",
+      model: "claude-test",
+      content: [block],
+    });
+
+    assert.ok(html.includes("src/example.ts"));
+    assert.match(html, /first line\nsecond line\n/);
+    assert.doesNotMatch(html, /"content":/);
+  } finally {
+    clearExpandedToolCalls();
+  }
+});
+
+test("keeps the input JSON for a write with another argument, an empty file or streamed input", () => {
+  const cases = [
+    { id: "call-write-mode", input: { path: "notes.md", content: "text", mode: "append" } },
+    { id: "call-write-empty", input: { path: "empty.txt", content: "" } },
+    { id: "call-write-streaming", input: {}, rawInput: "{\"path\":\"a.ts\",\"content\":\"one\\ntwo" },
+  ];
+  for (const { id, input, rawInput } of cases) {
+    const block = { type: "toolCall", toolCallId: id, toolName: "write", input, ...(rawInput === undefined ? {} : { rawInput }) };
+    clearExpandedToolCalls();
+    setToolCallExpanded(id, true);
+    try {
+      const html = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [block] });
+      assert.equal(textOf(html).includes(getToolCallInputText(block)), true, id);
+    } finally {
+      clearExpandedToolCalls();
+    }
+  }
+});
+
+test("renders subagents as standard tool calls with only an extra side-panel button", () => {
   const block = {
     type: "toolCall",
     toolCallId: "call-agent-1",
@@ -160,13 +258,13 @@ test("renders subagents as standard tool calls with only an extra session button
     content: [block],
   }, {
     toolResults: new Map([[block.toolCallId, result]]),
-    onOpenSession() {},
+    onOpenSubagent() {},
   });
 
   assert.match(html, /border:1px solid rgba\(34,197,94,0\.25\)/);
   assert.match(html, />Agent</);
   assert.match(html, />Explore</);
-  assert.match(html, /aria-label="Open sub-agent session"/);
+  assert.match(html, /aria-label="View sub-agent work in side panel"/);
   assert.doesNotMatch(html, />completed</);
   assert.doesNotMatch(html, />Find parser</);
 
@@ -177,9 +275,26 @@ test("renders subagents as standard tool calls with only an extra session button
     content: [{ ...block, toolCallId: "call-extension-1", toolName: "extension_tool" }],
   }, {
     toolResults: new Map(),
-    onOpenSession() {},
+    onOpenSubagent() {},
   });
-  assert.doesNotMatch(ordinaryHtml, /Open sub-agent session/);
+  assert.doesNotMatch(ordinaryHtml, /View sub-agent work in side panel/);
+});
+
+test("a tool card shows the run time pi recorded, else the timestamps' difference, never a tiny one", () => {
+  const block = { type: "toolCall", toolCallId: "call-duration-1", toolName: "bash", arguments: { command: "make" } };
+  const message = { role: "assistant", provider: "anthropic", model: "claude-test", content: [block], timestamp: 1_000_000, durationMs: 4_000 };
+  const header = (result) => renderMessage(message, { toolResults: new Map([[block.toolCallId, result]]) });
+  const result = { role: "toolResult", toolCallId: block.toolCallId, toolName: "bash", content: [], isError: false };
+  // pi 1.1 records the execution itself; the timestamps would count the model's 4 s of generation too.
+  assert.match(header({ ...result, timestamp: 1_006_400, durationMs: 2_400 }), />2\.4s</);
+  // A result saved before pi recorded durations falls back to the timestamps.
+  assert.match(header({ ...result, timestamp: 1_006_400 }), />6\.4s</);
+  assert.doesNotMatch(header({ ...result, timestamp: 1_006_400, durationMs: 40 }), />\d+\.\ds</);
+
+  assert.equal(formatToolDuration(400), "0.4s");
+  assert.equal(formatToolDuration(59_940), "59.9s");
+  assert.equal(formatToolDuration(185_000), "3m 5s");
+  assert.equal(formatToolDuration(3_725_000), "1h 2m 5s");
 });
 
 const COMPLETE_SKILL_EXPANSION = `<skill name="review" location="/skills/review/SKILL.md">
@@ -398,6 +513,36 @@ test("marks apply_patch returned failures as errors even when isError is unset",
   assert.doesNotMatch(html, /border:1px solid rgba\(34,197,94,0\.25\)/);
 });
 
+test("collapses a displayed custom message from its header alone", () => {
+  const custom = (props) => renderMessage({
+    role: "custom",
+    customType: "extension",
+    display: true,
+    timestamp: Date.now(),
+    ...props,
+  });
+  // The header is the card's first button and the only one holding the title.
+  const header = (html) => html.slice(0, html.indexOf("</button>"));
+
+  // The header is the toggle, so a message with no `details` can collapse too.
+  const shown = custom({ content: [{ type: "text", text: "a message with no details" }] });
+  assert.match(header(shown), /aria-expanded="true"/);
+  assert.match(header(shown), />extension</);
+  // The footer is for details only; it is not a second way to collapse.
+  assert.doesNotMatch(shown, /Show details|Hide details/);
+
+  // It starts expanded, as pi's TUI draws a displayed custom message in full.
+  assert.match(shown, /a message with no details/);
+  // A message with no text (images only) can collapse too.
+  assert.match(header(custom({ content: [] })), /aria-expanded="true"/);
+
+  // A message that does carry details keeps that button, for its details.
+  assert.match(
+    custom({ content: [{ type: "text", text: "a message with details" }], details: { files: ["a.ts"] } }),
+    /Show details/,
+  );
+});
+
 test("renders custom-message images as buttons that open a larger preview", () => {
   const html = renderMessage({
     role: "custom",
@@ -453,8 +598,6 @@ test("uses the unanswered truncation notice for an empty length reply", () => {
   assert.match(html, /nearly full context/i);
   assert.doesNotMatch(html, /follow-up/i);
 });
-
-const { setToolCallExpanded } = await jiti.import("@/lib/tool-call-expansion");
 
 function textOf(html) {
   return html.replace(/<[^>]+>/g, "").replace(/&quot;/g, "\"").replace(/&amp;/g, "&").replace(/&#x27;/g, "'");
@@ -526,9 +669,9 @@ test("expands a codemode call into its script, its calls, and the output without
   });
   const text = textOf(html);
 
-  assert.match(html, /markdown-code-lang">javascript</);
-  assert.match(text, /\/\/ @options: \{"timeoutMs": 5000\}/);
-  assert.match(text, /return files\.length;/);
+  // The script sits in the plain box any tool's input uses, not a highlighted code block.
+  assert.doesNotMatch(html, /markdown-code-block/);
+  assert.equal(textOf(html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/)[1]), CODEMODE_SCRIPT);
   assert.match(text, /Tool calls/);
   assert.match(text, /Show 5 earlier calls/);
   // The newest 20 of 25 calls are listed; the 5 oldest are folded.
@@ -629,4 +772,34 @@ test("keeps the registered name where no result names the server and tool", (t) 
     details: { calls: [{ id: "call-codemode-mcp/1", name: "mcp__docs_v2__search_pages", args: "{}", status: "ok" }] },
   });
   assert.match(textOf(html), /mcp__docs_v2__search_pages\{\}/);
+});
+
+test("collapses the compaction summary to its title and token count, as pi's TUI does (#1026)", () => {
+  const summary = "## Goal\n\nShip the parser fix.\n\n<read-files>\nlib/read.ts\n</read-files>\n\n<modified-files>\nlib/changed.ts\n</modified-files>";
+  const message = {
+    role: "custom",
+    customType: "compaction",
+    content: summary,
+    display: true,
+    details: { tokensBefore: 123456, firstKeptEntryId: "kept0001" },
+  };
+  const html = renderMessage(message);
+
+  assert.match(html, /<button type="button" aria-expanded="false" title="Expand"/);
+  assert.match(html, /Conversation compacted/);
+  assert.ok(html.includes(`Compacted from ${(123456).toLocaleString()} tokens`));
+  assert.doesNotMatch(html, /Ship the parser fix|following summary|File context|lib\/read\.ts|lib\/changed\.ts/);
+  assert.doesNotMatch(renderMessage({ ...message, details: undefined }), /Compacted from/);
+
+  // What the toggle reveals.
+  const details = renderToStaticMarkup(React.createElement(
+    I18nProvider,
+    null,
+    React.createElement(CompactionSummaryDetails, { summary }),
+  ));
+  assert.match(details, /following summary/);
+  assert.match(details, /Ship the parser fix/);
+  assert.match(details, /File context: 1 read, 1 modified/);
+  assert.match(details, /lib\/read\.ts/);
+  assert.match(details, /lib\/changed\.ts/);
 });
