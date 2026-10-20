@@ -562,14 +562,47 @@ html.dark .web-login-error {
   cursor: not-allowed;
 }
 
+/* The terminal has its own light/dark choice (lib/terminal-theme.ts), apart
+   from the app theme. Its backgrounds match the xterm palettes there. */
 .terminal-panel {
+  --terminal-bg: #111318;
+  --terminal-header-bg: #181b21;
+  --terminal-border: #2f3540;
+  --terminal-button-border: #343a46;
+  --terminal-hover-bg: #242932;
+  --terminal-muted: #9ca3af;
+  --terminal-strong: #e5e7eb;
+  --terminal-key: #d7dce5;
+  --terminal-accent: #60a5fa;
+  --terminal-error-border: #5f2424;
+  --terminal-error-bg: #321b1b;
+  --terminal-error-text: #fca5a5;
+  --terminal-scrollbar: 156, 163, 175;
   display: grid;
   grid-template-rows: 38px auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  background: #111318;
+  background: var(--terminal-bg);
+  color-scheme: dark;
+}
+
+.terminal-panel[data-terminal-theme="light"] {
+  --terminal-bg: #fbfbfc;
+  --terminal-header-bg: #f3f4f6;
+  --terminal-border: #e5e7eb;
+  --terminal-button-border: #d1d5db;
+  --terminal-hover-bg: #e5e7eb;
+  --terminal-muted: #6b7280;
+  --terminal-strong: #111827;
+  --terminal-key: #1f2937;
+  --terminal-accent: #2563eb;
+  --terminal-error-border: #fecaca;
+  --terminal-error-bg: #fef2f2;
+  --terminal-error-text: #b91c1c;
+  --terminal-scrollbar: 107, 114, 128;
+  color-scheme: light;
 }
 
 .terminal-panel-header {
@@ -578,11 +611,18 @@ html.dark .web-login-error {
   justify-content: space-between;
   min-width: 0;
   padding: 0 10px 0 13px;
-  border-bottom: 1px solid #2f3540;
-  background: #181b21;
-  color: #9ca3af;
+  border-bottom: 1px solid var(--terminal-border);
+  background: var(--terminal-header-bg);
+  color: var(--terminal-muted);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+.terminal-panel-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
 }
 
 .terminal-panel-path {
@@ -617,31 +657,31 @@ html.dark .web-login-error {
   height: 27px;
   flex-shrink: 0;
   padding: 0 8px;
-  border: 1px solid #343a46;
+  border: 1px solid var(--terminal-button-border);
   border-radius: 5px;
   background: transparent;
-  color: #9ca3af;
+  color: var(--terminal-muted);
   cursor: pointer;
   font: inherit;
 }
 
 .terminal-panel-exit {
   padding: 7px 12px;
-  color: #9ca3af;
+  color: var(--terminal-muted);
   font-family: var(--font-mono);
   font-size: 11px;
 }
 
 .terminal-panel-header button:hover {
-  background: #242932;
-  color: #e5e7eb;
+  background: var(--terminal-hover-bg);
+  color: var(--terminal-strong);
 }
 
 .terminal-panel-error {
   padding: 7px 12px;
-  border-bottom: 1px solid #5f2424;
-  background: #321b1b;
-  color: #fca5a5;
+  border-bottom: 1px solid var(--terminal-error-border);
+  background: var(--terminal-error-bg);
+  color: var(--terminal-error-text);
   font-family: var(--font-mono);
   font-size: 11px;
 }
@@ -664,8 +704,8 @@ html.dark .web-login-error {
   grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-auto-rows: 36px;
   padding-bottom: env(safe-area-inset-bottom);
-  border-top: 1px solid #2f3540;
-  background: #181b21;
+  border-top: 1px solid var(--terminal-border);
+  background: var(--terminal-header-bg);
 }
 
 .terminal-xterm:has(+ .terminal-extra-keys) {
@@ -681,7 +721,7 @@ html[data-keyboard-open] .terminal-extra-keys {
   padding: 0;
   border: none;
   background: transparent;
-  color: #d7dce5;
+  color: var(--terminal-key);
   font-family: var(--font-mono);
   font-size: 12px;
   touch-action: manipulation;
@@ -692,7 +732,7 @@ html[data-keyboard-open] .terminal-extra-keys {
 }
 
 .terminal-extra-keys button:active {
-  background: #242932;
+  background: var(--terminal-hover-bg);
 }
 
 .terminal-extra-keys .is-rotated {
@@ -701,7 +741,7 @@ html[data-keyboard-open] .terminal-extra-keys {
 }
 
 .terminal-extra-keys button.is-active {
-  color: #60a5fa;
+  color: var(--terminal-accent);
 }
 
 .terminal-xterm-host {
@@ -710,7 +750,7 @@ html[data-keyboard-open] .terminal-extra-keys {
 }
 
 .terminal-xterm .xterm-viewport {
-  background-color: #111318;
+  background-color: var(--terminal-bg);
 }
 
 /*
@@ -772,16 +812,26 @@ html[data-keyboard-open] .terminal-extra-keys {
   }
 }
 
-/* The terminal keeps its dark surface in every theme, so --text-dim (a dark
-   grey in the light themes) would disappear against it. */
+/* The file panel's tab strip hides its scrollbar: a scrollbar takes its height
+   out of the 36px bar and squeezes the tabs (#1225). A wheel, a swipe or the
+   arrow keys scroll it, and TabBar keeps the active tab in view. */
+.tabbar-scroll {
+  scrollbar-width: none;
+}
+.tabbar-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* The terminal picks its surface apart from the app theme, so --text-dim
+   could disappear against it. */
 .terminal-xterm .xterm-viewport::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.45);
+  background-color: rgba(var(--terminal-scrollbar), 0.45);
 }
 .terminal-xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.72);
+  background-color: rgba(var(--terminal-scrollbar), 0.72);
 }
 .terminal-xterm .xterm-viewport::-webkit-scrollbar-thumb:active {
-  background-color: rgb(156, 163, 175);
+  background-color: rgb(var(--terminal-scrollbar));
 }
 
 
@@ -1134,6 +1184,28 @@ pre, code {
   display: block;
   max-width: 100%;
   height: auto;
+  margin: 8px 0;
+  border-radius: 6px;
+}
+/* Firefox draws its audio controls without a background (bare buttons on the
+   page), Chrome inside a grey pill: both get the same frame from the theme. */
+.markdown-body audio {
+  display: block;
+  width: min(360px, 100%);
+  height: 36px;
+  margin: 8px 0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  clip-path: inset(0 round 18px);
+}
+.markdown-body audio::-webkit-media-controls-enclosure {
+  background: transparent;
+}
+.markdown-body video {
+  display: block;
+  max-width: min(640px, 100%);
+  max-height: 360px;
   margin: 8px 0;
   border-radius: 6px;
 }
@@ -2694,8 +2766,13 @@ span.token.table {
    touch screens opt in too; tablets keep their controls because the keyboard
    leaves them enough height. */
 @media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
-  html[data-keyboard-open] .chat-input-controls,
   html[data-keyboard-open] .extension-status-shelf {
+    display: none !important;
+  }
+  /* Except while its model picker is open: the picker's filter is the field
+     the keyboard is for, and hiding its row would hide the picker (#1271).
+     Its own rule, so a browser without :has() drops only this one. */
+  html[data-keyboard-open] .chat-input-controls:not(:has(.model-selector [role="listbox"])) {
     display: none !important;
   }
   html[data-keyboard-open] .chat-content {

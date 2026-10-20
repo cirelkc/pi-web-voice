@@ -119,7 +119,7 @@ Keep in mind the upstream server itself should not be exposed with mic-granting 
 
 ## Upstream
 
-All upstream pi-web features and docs apply unchanged — see the [upstream README](https://github.com/agegr/pi-web#readme). This fork tracks upstream `v0.12.1`.
+All upstream pi-web features and docs apply unchanged — see the [upstream README](https://github.com/agegr/pi-web#readme). This fork tracks upstream `v0.12.2`.
 
 ## License
 
