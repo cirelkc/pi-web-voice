@@ -78,6 +78,7 @@ import { focusIfLost, type FocusDocument } from "@/lib/stacked-dialog";
 import { useFilesPlacement } from "@/hooks/useFilesPlacement";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useProjectOrder } from "@/hooks/useProjectOrder";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useScrollbarVisibility } from "@/hooks/useScrollbarVisibility";
 import { useSessionUiState } from "@/hooks/useSessionUiState";
@@ -567,6 +568,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // browser storage after hydration; the layout's choice is read the same
   // way (useFilesPlacement's server snapshot).
   const filesPlacement = useFilesPlacement();
+  // Project groups go by their newest session unless this browser chose the
+  // saved (dragged) order; see hooks/useProjectOrder.ts.
+  const projectsByActivity = useProjectOrder() === "recent";
   const stacked = !isMobile && filesPlacement === "below";
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("sessions");
   const [filesCollapsed, setFilesCollapsed] = useState(false);
@@ -1427,7 +1431,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     groupExpansion: shownGroupExpansion,
     moreShown,
     pinnedCollapsed,
-  }), [allSessions, uiState, runningSessionIds, awaitingInputSessionIds, unreadSessionIds, selectedSessionId, currentProject, shownGroupExpansion, moreShown, pinnedCollapsed]);
+    projectsByActivity,
+  }), [allSessions, uiState, runningSessionIds, awaitingInputSessionIds, unreadSessionIds, selectedSessionId, currentProject, shownGroupExpansion, moreShown, pinnedCollapsed, projectsByActivity]);
   // Built while the archive view is rendered, its way out included: it
   // leaves as it was, not empty.
   const archiveMounted = archiveMotion.archiveMounted;
@@ -1463,7 +1468,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // (nextProjectKeysToRecord): a batch never lands below keys still unsaved.
   // Each key is sent once per page: a refused save is not retried in a loop,
   // and keys that do not fit a full list are not sent again and again. A
-  // background save fails quietly (the raw apply, no toast).
+  // background save fails quietly (the raw apply, no toast). With the
+  // recent-first order the model asks for nothing (`projectKeysToRecord` is
+  // empty): the saved order stays as it was for a browser that goes back to
+  // it.
   const recordedOrderKeysRef = useRef(new Set<string>());
   const projectKeysToRecord = model.projectKeysToRecord;
   const storedOrderLength = uiState.projectOrder?.length ?? 0;
@@ -2364,22 +2372,25 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onSelect: () => openProjectInNewTab(project),
       },
       { type: "separator", id: "separator-layout" },
-      {
-        type: "item",
-        id: "move-up",
-        label: t("sidebar.moveProjectUp"),
-        icon: <ChevronIcon className="sidebar-icon-up" />,
-        disabled: up === null,
-        onSelect: () => { if (up) moveProject(project.key, up.anchorKey, up.position); },
-      },
-      {
-        type: "item",
-        id: "move-down",
-        label: t("sidebar.moveProjectDown"),
-        icon: <ChevronIcon className="sidebar-icon-down" />,
-        disabled: down === null,
-        onSelect: () => { if (down) moveProject(project.key, down.anchorKey, down.position); },
-      },
+      // Nobody moves a group the recent-first order places on its own.
+      ...(projectsByActivity ? [] : [
+        {
+          type: "item",
+          id: "move-up",
+          label: t("sidebar.moveProjectUp"),
+          icon: <ChevronIcon className="sidebar-icon-up" />,
+          disabled: up === null,
+          onSelect: () => { if (up) moveProject(project.key, up.anchorKey, up.position); },
+        },
+        {
+          type: "item",
+          id: "move-down",
+          label: t("sidebar.moveProjectDown"),
+          icon: <ChevronIcon className="sidebar-icon-down" />,
+          disabled: down === null,
+          onSelect: () => { if (down) moveProject(project.key, down.anchorKey, down.position); },
+        },
+      ] as SidebarMenuItem[]),
       {
         // This project open, every other one closed.
         type: "item",
@@ -2642,7 +2653,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onOpenOtherProject: handleOpenOtherProject,
     onOpenArchive: () => openArchiveView(),
     // The archive view has no group rows: only the main tree's can be dragged.
-    onMoveGroup: moveProject,
+    // Recent-first has no places to drop into: the groups reorder themselves.
+    onMoveGroup: projectsByActivity ? undefined : moveProject,
   } as const;
 
   const explorerCwd = selectedCwd ?? selectedCwdProp ?? null;

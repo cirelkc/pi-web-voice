@@ -15,6 +15,7 @@ import {
 } from "@/hooks/useChatAppearance";
 import { useEnterSendMode, setEnterSendMode } from "@/hooks/useEnterSendMode";
 import { useFilesPlacement, setFilesPlacement } from "@/hooks/useFilesPlacement";
+import { useProjectOrder, setProjectOrder } from "@/hooks/useProjectOrder";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ProjectTrustStatus, ToolSettingsResponse } from "@/lib/api-types";
 import {
@@ -80,6 +81,7 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
   const { width: chatContentWidth, setWidth: setChatContentWidth, fontSize, setFontSize } = useChatAppearance();
   const enterSendMode = useEnterSendMode();
   const filesPlacement = useFilesPlacement();
+  const projectOrder = useProjectOrder();
   const [shellSettings, setShellSettings] = useState<ToolSettingsResponse | null>(null);
   const [shellSaving, setShellSaving] = useState(false);
   const [shellError, setShellError] = useState<string | null>(null);
@@ -418,6 +420,39 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
           </div>
         </div>
         <p id="settings-files-placement-description" className="settings-general-description">{t("settings.filesPlacementDescription")}</p>
+        <div
+          className="settings-chat-option settings-chat-switch-option"
+          role="radiogroup"
+          aria-label={t("settings.projectOrder")}
+          aria-describedby="settings-project-order-description"
+        >
+          <span>{t("settings.projectOrder")}</span>
+          <div className="settings-send-mode-options">
+            <label className="settings-send-mode-option">
+              <input
+                type="radio"
+                name="project-order"
+                value="recent"
+                checked={projectOrder === "recent"}
+                onChange={() => setProjectOrder("recent")}
+                className="sr-only"
+              />
+              <span className="settings-send-mode-label">{t("settings.projectOrderRecent")}</span>
+            </label>
+            <label className="settings-send-mode-option">
+              <input
+                type="radio"
+                name="project-order"
+                value="saved"
+                checked={projectOrder === "saved"}
+                onChange={() => setProjectOrder("saved")}
+                className="sr-only"
+              />
+              <span className="settings-send-mode-label">{t("settings.projectOrderSaved")}</span>
+            </label>
+          </div>
+        </div>
+        <p id="settings-project-order-description" className="settings-general-description">{t("settings.projectOrderDescription")}</p>
       </section>
 
       {shellSettings?.isWindows && (
